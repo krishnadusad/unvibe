@@ -97,10 +97,26 @@ async function runFetch(runner: CommandRunner, repoPath: string, refspecs: strin
   }
 }
 
-async function bestEffortFetch(runner: CommandRunner, repoPath: string, ref: string): Promise<FetchAttempt> {
-  if (!ref) return { command: "git fetch origin", ok: false, detail: "no ref to fetch" };
+/**
+ * Explicit refspec for a branch name: `+refs/heads/<b>:refs/remotes/origin/<b>`.
+ * A bare `git fetch origin <b>` only writes `FETCH_HEAD`; it updates
+ * `origin/<b>` only when the remote's configured fetch refspec already
+ * covers `<b>`. Single-branch clones (`clone --single-branch`, CI-style
+ * checkouts, `remote.origin.fetch` narrowed to `main`) don't, so a stacked
+ * PR's base never became `origin/<base>` and the merge-base failed. Naming
+ * the destination makes the remote-tracking ref exist after the fetch,
+ * whatever the clone's refspec. Already-qualified `origin/…` names map to
+ * their branch.
+ */
+export function branchRefspec(branch: string): string {
+  const name = branch.startsWith("origin/") ? branch.slice("origin/".length) : branch;
+  return `+refs/heads/${name}:refs/remotes/origin/${name}`;
+}
+
+async function bestEffortFetch(runner: CommandRunner, repoPath: string, branch: string): Promise<FetchAttempt> {
+  if (!branch) return { command: "git fetch origin", ok: false, detail: "no ref to fetch" };
   // No remote / offline / test fixture: ingest proceeds with local refs.
-  return runFetch(runner, repoPath, [ref]);
+  return runFetch(runner, repoPath, [branchRefspec(branch)]);
 }
 
 /**
@@ -120,28 +136,12 @@ export function baseRefCandidates(baseRefName: string): string[] {
 }
 
 /**
- * Fetch a PR head best-effort (#93): `refs/pull/<n>/head` works for fork
- * and same-repo PRs alike; the branch name is the fallback for remotes
- * without pull refs. Remote-less fixtures fail both and proceed locally.
- */
-async function fetchPrHead(
-  runner: CommandRunner,
-  repoPath: string,
-  pr: number,
-  headRefName: string,
-): Promise<void> {
-  // #139: same gh-login handling as the ingest fetch (refresh path stays quiet).
-  const first = await runFetch(runner, repoPath, [`refs/pull/${pr}/head`]);
-  if (first.ok) return;
-  if (headRefName) {
-    await bestEffortFetch(runner, repoPath, headRefName);
-  }
-}
-
-/**
  * #123: one `git fetch` for the PR head and the base together (was two
  * sequential fetches). The head keeps its #93 shape — `refs/pull/<n>/head`
- * with the branch-name fallback — and the base stays best-effort.
+ * with the branch-name fallback — and the base stays best-effort. The base
+ * goes through `branchRefspec` so `origin/<base>` exists afterwards even in
+ * a single-branch clone (stacked PRs). Refresh uses the same fetch, so a
+ * stacked base that moved since ingest is current too.
  *
  * #139: every attempt is returned (combined and fallback). Best-effort
  * stays — offline use and remote-less fixtures keep working — it just
@@ -155,7 +155,11 @@ async function fetchPrHeadAndBase(
   headRefName: string,
   baseRefName: string,
 ): Promise<FetchAttempt[]> {
-  const first = await runFetch(runner, repoPath, [`refs/pull/${pr}/head`, baseRefName].filter(Boolean));
+  const first = await runFetch(
+    runner,
+    repoPath,
+    [`refs/pull/${pr}/head`, ...(baseRefName ? [branchRefspec(baseRefName)] : [])],
+  );
   if (first.ok) return [first];
   const out = [first];
   if (headRefName) {
@@ -537,7 +541,8 @@ export async function resolveHead(
 ): Promise<{ headSha: string; baseRef: string }> {
   if (opts.pr !== undefined) {
     const info = await fetchPrInfo(runner, repoPath, opts.pr);
-    await fetchPrHead(runner, repoPath, opts.pr, info.headRefName);
+    // #139: same gh-login handling as the ingest fetch (refresh path stays quiet).
+    await fetchPrHeadAndBase(runner, repoPath, opts.pr, info.headRefName, info.baseRefName);
     let headSha = info.headRefOid;
     if (!headSha) {
       const local = await runGit(runner, ["rev-parse", info.headRefName], repoPath);

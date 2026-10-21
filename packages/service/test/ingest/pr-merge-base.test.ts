@@ -178,7 +178,7 @@ describe("resolveHead (stubbed)", () => {
     });
     fake.enqueue({
       cmd: "git",
-      args: ["-c", "credential.https://github.com.helper=!gh auth git-credential", "fetch", "origin", "refs/pull/7/head"],
+      args: ["-c", "credential.https://github.com.helper=!gh auth git-credential", "fetch", "origin", "refs/pull/7/head", "+refs/heads/main:refs/remotes/origin/main"],
       stdout: "",
       stderr: "",
       code: 0,
@@ -186,7 +186,7 @@ describe("resolveHead (stubbed)", () => {
     const out = await resolveHead(fake, "/repo", { pr: 7 });
     expect(out).toEqual({ headSha: "abc123", baseRef: "main" });
     expect(fake.calls.map((c) => `${c.cmd} ${c.opts.args.join(" ")}`)).toContain(
-      "git -c credential.https://github.com.helper=!gh auth git-credential fetch origin refs/pull/7/head",
+      "git -c credential.https://github.com.helper=!gh auth git-credential fetch origin refs/pull/7/head +refs/heads/main:refs/remotes/origin/main",
     );
   });
 
@@ -209,16 +209,23 @@ describe("resolveHead (stubbed)", () => {
     });
     fake.enqueue({
       cmd: "git",
-      args: ["-c", "credential.https://github.com.helper=!gh auth git-credential", "fetch", "origin", "refs/pull/9/head"],
+      args: ["-c", "credential.https://github.com.helper=!gh auth git-credential", "fetch", "origin", "refs/pull/9/head", "+refs/heads/main:refs/remotes/origin/main"],
       stdout: "",
       stderr: "couldn't find remote ref",
       code: 128,
     });
-    // fetchPrHead swallows the failure code (best-effort): it still runs
-    // the branch-name fallback as a second fetch.
+    // The combined fetch is best-effort: on failure it still runs the
+    // branch-name head fallback and the base as separate fetches.
     fake.enqueue({
       cmd: "git",
-      args: ["-c", "credential.https://github.com.helper=!gh auth git-credential", "fetch", "origin", "feature"],
+      args: ["-c", "credential.https://github.com.helper=!gh auth git-credential", "fetch", "origin", "+refs/heads/feature:refs/remotes/origin/feature"],
+      stdout: "",
+      stderr: "",
+      code: 0,
+    });
+    fake.enqueue({
+      cmd: "git",
+      args: ["-c", "credential.https://github.com.helper=!gh auth git-credential", "fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"],
       stdout: "",
       stderr: "",
       code: 0,
@@ -227,10 +234,13 @@ describe("resolveHead (stubbed)", () => {
     expect(out.headSha).toBe("abc123");
     const cmds = fake.calls.map((c) => `${c.cmd} ${c.opts.args.join(" ")}`);
     expect(cmds).toContain(
-      "git -c credential.https://github.com.helper=!gh auth git-credential fetch origin refs/pull/9/head",
+      "git -c credential.https://github.com.helper=!gh auth git-credential fetch origin refs/pull/9/head +refs/heads/main:refs/remotes/origin/main",
     );
     expect(cmds).toContain(
-      "git -c credential.https://github.com.helper=!gh auth git-credential fetch origin feature",
+      "git -c credential.https://github.com.helper=!gh auth git-credential fetch origin +refs/heads/feature:refs/remotes/origin/feature",
+    );
+    expect(cmds).toContain(
+      "git -c credential.https://github.com.helper=!gh auth git-credential fetch origin +refs/heads/main:refs/remotes/origin/main",
     );
   });
 });
@@ -299,7 +309,7 @@ describe("ingestReview PR paths (fake gh + real git)", () => {
     // refs/pull/<n>/head (branch-name fallback only when that fails).
     // #139: every fetch carries the gh credential config ahead of the fetch.
     expect(seenFetches[0]).toBe(
-      "-c credential.https://github.com.helper=!gh auth git-credential fetch origin refs/pull/7/head main",
+      "-c credential.https://github.com.helper=!gh auth git-credential fetch origin refs/pull/7/head +refs/heads/main:refs/remotes/origin/main",
     );
   });
 

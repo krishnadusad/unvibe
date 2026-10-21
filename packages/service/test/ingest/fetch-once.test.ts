@@ -126,7 +126,7 @@ describe("#123 one fetch at ingest", () => {
     expect(out.files.length).toBeGreaterThan(0);
     // One git fetch, both refspecs (with the #139 gh credential config).
     expect(fetches).toEqual([
-      ["-c", "credential.https://github.com.helper=!gh auth git-credential", "fetch", "origin", "refs/pull/42/head", "main"],
+      ["-c", "credential.https://github.com.helper=!gh auth git-credential", "fetch", "origin", "refs/pull/42/head", "+refs/heads/main:refs/remotes/origin/main"],
     ]);
     // gh and the refresh overlapped (sequentially they would take 600 ms+).
     const gh = spans.find((s) => s.label === "gh")!;
@@ -154,21 +154,21 @@ describe("#123 one fetch at ingest", () => {
     const cred = ["-c", "credential.https://github.com.helper=!gh auth git-credential"];
     fake.enqueue({
       cmd: "git",
-      args: [...cred, "fetch", "origin", "refs/pull/42/head", "main"],
+      args: [...cred, "fetch", "origin", "refs/pull/42/head", "+refs/heads/main:refs/remotes/origin/main"],
       stdout: "",
       stderr: "fatal: Authentication failed for 'https://github.com/o/r/'",
       code: 1,
     });
     fake.enqueue({
       cmd: "git",
-      args: [...cred, "fetch", "origin", "feature"],
+      args: [...cred, "fetch", "origin", "+refs/heads/feature:refs/remotes/origin/feature"],
       stdout: "",
       stderr: "fatal: Authentication failed for 'https://github.com/o/r/'",
       code: 1,
     });
     fake.enqueue({
       cmd: "git",
-      args: [...cred, "fetch", "origin", "main"],
+      args: [...cred, "fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"],
       stdout: "",
       stderr: "fatal: Authentication failed for 'https://github.com/o/r/'",
       code: 1,
@@ -183,7 +183,7 @@ describe("#123 one fetch at ingest", () => {
     } catch (e) {
       message = (e as Error).message;
     }
-    expect(message).toContain("couldn't download the commits for PR #42 (git fetch origin refs/pull/42/head main failed");
+    expect(message).toContain("couldn't download the commits for PR #42 (git fetch origin refs/pull/42/head +refs/heads/main:refs/remotes/origin/main failed");
     expect(message).toContain("fatal: Authentication failed");
     expect(message).toContain("then try again");
     expect(message).not.toContain("wasn't found in this repo");
@@ -243,10 +243,10 @@ describe("#123 one fetch at ingest", () => {
     // Combined attempt first (fails on the pull refspec), then the #93
     // per-refspec fallback: branch head + base.
     const cred = ["-c", "credential.https://github.com.helper=!gh auth git-credential"];
-    expect(fetches[0]).toEqual([...cred, "fetch", "origin", "refs/pull/42/head", "main"]);
+    expect(fetches[0]).toEqual([...cred, "fetch", "origin", "refs/pull/42/head", "+refs/heads/main:refs/remotes/origin/main"]);
     expect(fetches.slice(1)).toEqual([
-      [...cred, "fetch", "origin", "feature"],
-      [...cred, "fetch", "origin", "main"],
+      [...cred, "fetch", "origin", "+refs/heads/feature:refs/remotes/origin/feature"],
+      [...cred, "fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"],
     ]);
   });
 });
