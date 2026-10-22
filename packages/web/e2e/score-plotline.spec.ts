@@ -93,3 +93,28 @@ test("guide Plotlines entry filters the diff and scrolls to its first hunk", asy
   });
   expect(inView).toBe(true);
 });
+
+test("guide Plotlines text is selectable and a selection is not a pick", async ({ page }) => {
+  const name = page.locator(".plotlines .plname", { hasText: "Unfold folded values" });
+  const box = await name.boundingBox();
+  if (!box) throw new Error("plotline name not laid out");
+  // Drag across the bold name, as a reader copying it would.
+  await page.mouse.move(box.x + 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selected).toContain("Unfold folded");
+  // Finishing the selection did not toggle the filter.
+  await expect(page.locator('[data-plotpick="unfold"]').first()).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator('[data-filterchip="plotline"]')).toHaveCount(0);
+});
+
+test("guide Plotlines entry still works from the keyboard", async ({ page }) => {
+  const row = page.locator('.plotlines [data-plotpick="unfold-tests"]');
+  await expect(row).toHaveAttribute("role", "button");
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-filterchip="plotline"]')).toContainText("Plotline: Prove the unfolding works");
+  await expect(row).toHaveAttribute("aria-pressed", "true");
+});

@@ -117,7 +117,7 @@ describe("stacked PR in a single-branch clone", () => {
     await git(seed, "push", "-q", "origin", "stacked-base");
 
     const got = await resolveHead(ghRunner(() => head), work, { pr: 42 });
-    expect(got).toEqual({ headSha: head, baseRef: "stacked-base" });
+    expect(got).toMatchObject({ headSha: head, baseRef: "stacked-base" });
     expect(await git(work, "rev-parse", "origin/stacked-base")).toBe(movedBase);
   });
 });

@@ -6,7 +6,7 @@
  * before pending cards. Finding pages get the rust-accent `.finding`
  * class.
  */
-import { Fragment, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { Card, Page, Plotline } from "@unvibe/shared";
 import { DEFAULT_GUIDE_TITLE, isDefaultGuideTitle, PLOTLINE_OTHER_ID } from "@unvibe/shared";
 import { api } from "../api/client.js";
@@ -159,7 +159,13 @@ function Plotlines({ reviewId }: { reviewId: string }): ReactNode {
                       "aria-pressed": active,
                       "data-plotpick": r.id,
                       "data-tip": active ? "Show all hunks" : `Show only ${r.name}`,
-                      onClick: () => pick(r.id, r.ref),
+                      onClick: (e: MouseEvent) => {
+                        // The click that ends a drag-selection inside the row
+                        // is a copy of the text, not a pick.
+                        const sel = window.getSelection();
+                        if (sel && !sel.isCollapsed && e.currentTarget instanceof Node && e.currentTarget.contains(sel.anchorNode)) return;
+                        pick(r.id, r.ref);
+                      },
                       onKeyDown: (e: KeyboardEvent) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
