@@ -42,6 +42,17 @@ describe("SettingsStore", () => {
     expect(store.get().uiTheme).toBe("studio");
   });
 
+  it("persists the light/dark mode and rejects unknown modes", () => {
+    const store = makeStore();
+    expect(store.get().colorMode).toBe("system");
+    expect(store.update({ colorMode: "light" }).errors).toBeUndefined();
+    expect(store.get().colorMode).toBe("light");
+    expect(store.update({ colorMode: "sepia" as never }).errors).toMatchObject([
+      expect.stringContaining("colorMode"),
+    ]);
+    expect(store.get().colorMode).toBe("light");
+  });
+
   it("rejects invalid updates", () => {
     const store = makeStore();
     expect(store.update({ sessionsPerProvider: 0 }).errors).toMatchObject([

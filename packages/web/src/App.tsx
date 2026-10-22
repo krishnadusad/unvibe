@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { api } from "./api/client.js";
-import { syncUiThemeFromSettings } from "./theme/theme.js";
+import { syncColorModeFromSettings, syncUiThemeFromSettings } from "./theme/theme.js";
 import { RouteShellBoundary } from "./components/ErrorBoundary.js";
 import { DebugPageRoute } from "./debug/DebugPage.js";
 import { ReviewRoute } from "./ReviewRoute.js";
@@ -19,7 +19,9 @@ export function App() {
     api
       .settings()
       .then((s) => {
-        if (!cancelled) syncUiThemeFromSettings(s.uiTheme);
+        if (cancelled) return;
+        syncUiThemeFromSettings(s.uiTheme);
+        syncColorModeFromSettings(s.colorMode);
       })
       .catch(() => {
         // Settings unreachable: the boot theme stands.

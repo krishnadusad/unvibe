@@ -28,6 +28,7 @@ function settings(fullAccess: boolean): Awaited<ReturnType<typeof api.settings>>
     cacheLifetimeMs: 300000,
     idleExitMinutes: 10,
     uiTheme: "default",
+    colorMode: "system",
   versionPickerEnabled: false,
     fullAccess,
     autoGoDeeper: true,

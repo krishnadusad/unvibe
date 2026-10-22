@@ -5,12 +5,13 @@
  * so parallel review-state work in `store/migrate.ts` never conflicts.
  * Every field has a default; `get()` always returns a complete `Settings`.
  */
-import { isUiThemeId, UI_THEME_IDS } from "@unvibe/shared";
+import { COLOR_MODE_IDS, isColorModeId, isUiThemeId, UI_THEME_IDS } from "@unvibe/shared";
 import type { ModelPick, Settings } from "@unvibe/shared";
 import type { DatabaseSync } from "../store/db.js";
 
 export const DEFAULT_SETTINGS: Settings = {
   uiTheme: "default",
+  colorMode: "system",
   // Static fallback only (issue #88): live defaults from
   // `resolveEffectiveSettings` win whenever adapter listings are known.
   // These ids must exist on a fresh install with both providers logged in
@@ -93,6 +94,10 @@ export function validateSettings(patch: Record<string, unknown>): string[] {
   const uiTheme = patch["uiTheme"];
   if (uiTheme !== undefined && !isUiThemeId(uiTheme)) {
     errors.push(`uiTheme must be one of: ${UI_THEME_IDS.join(", ")}`);
+  }
+  const colorMode = patch["colorMode"];
+  if (colorMode !== undefined && !isColorModeId(colorMode)) {
+    errors.push(`colorMode must be one of: ${COLOR_MODE_IDS.join(", ")}`);
   }
   const picker = patch["versionPickerEnabled"];
   if (picker !== undefined && typeof picker !== "boolean") {

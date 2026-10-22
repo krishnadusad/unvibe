@@ -1033,9 +1033,30 @@ export function isUiThemeId(v: unknown): v is UiThemeId {
   return typeof v === "string" && (UI_THEME_IDS as readonly string[]).includes(v);
 }
 
+/**
+ * Light/dark mode, the axis every UI theme supplies both sets for:
+ * `"system"` follows `prefers-color-scheme`; `"light"` / `"dark"` pin it
+ * through `<html data-theme>`.
+ */
+export const COLOR_MODE_IDS = ["system", "light", "dark"] as const;
+export type ColorModeId = (typeof COLOR_MODE_IDS)[number];
+export const DEFAULT_COLOR_MODE: ColorModeId = "system";
+
+export const COLOR_MODES: { id: ColorModeId; label: string }[] = [
+  { id: "system", label: "System" },
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+];
+
+export function isColorModeId(v: unknown): v is ColorModeId {
+  return typeof v === "string" && (COLOR_MODE_IDS as readonly string[]).includes(v);
+}
+
 export interface Settings {
   /** UI theme (issue #196); persisted like every other setting. */
   uiTheme: UiThemeId;
+  /** Light/dark mode; persisted like every other setting. */
+  colorMode: ColorModeId;
   main: ModelPick;
   small: ModelPick;
   secondOpinion: ModelPick;

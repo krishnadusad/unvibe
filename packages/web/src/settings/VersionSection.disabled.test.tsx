@@ -29,6 +29,7 @@ const SETTINGS: Settings = {
   cacheLifetimeMs: 300000,
   idleExitMinutes: 10,
   uiTheme: "default",
+  colorMode: "system",
   versionPickerEnabled: true,
   fullAccess: false,
   autoGoDeeper: true,

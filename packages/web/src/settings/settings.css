@@ -87,3 +87,9 @@ mark.tm {
   overflow-wrap: anywhere;
 }
 
+
+/* Appearance: System / Light / Dark as one segmented control. */
+.mode-toggle {
+  display: inline-flex;
+  gap: var(--space-1);
+}

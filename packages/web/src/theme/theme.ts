@@ -3,11 +3,20 @@
  * `Settings.uiTheme` (service SQLite, via PUT /api/settings); the
  * `localStorage` mirror below lets `public/theme-init.js` apply the
  * theme before first paint on the next load. Light/dark (`data-theme`)
- * is an independent axis and is never touched here.
+ * is an independent axis, `Settings.colorMode`, applied and mirrored the
+ * same way by the color-mode functions at the end.
  */
-import { DEFAULT_UI_THEME, isUiThemeId, type UiThemeId } from "@unvibe/shared";
+import {
+  DEFAULT_COLOR_MODE,
+  DEFAULT_UI_THEME,
+  isColorModeId,
+  isUiThemeId,
+  type ColorModeId,
+  type UiThemeId,
+} from "@unvibe/shared";
 
 export const UI_THEME_STORAGE_KEY = "unvibe:ui-theme";
+export const COLOR_MODE_STORAGE_KEY = "unvibe:color-mode";
 
 /**
  * Per-theme font bundles (issue #196): dynamic imports, so a theme's
@@ -55,5 +64,33 @@ export function currentUiTheme(): UiThemeId {
 export function syncUiThemeFromSettings(theme: unknown): UiThemeId {
   const next: UiThemeId = isUiThemeId(theme) ? theme : DEFAULT_UI_THEME;
   applyUiTheme(next);
+  return next;
+}
+
+/**
+ * Apply a light/dark mode to <html> now and mirror it for the boot script.
+ * "system" removes `data-theme` so `prefers-color-scheme` decides; the CSS
+ * and D2 diagrams already read `data-theme` first.
+ */
+export function applyColorMode(mode: ColorModeId): void {
+  if (mode === "system") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", mode);
+  try {
+    localStorage.setItem(COLOR_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Storage unavailable: the attribute still applies for this page.
+  }
+}
+
+/** Mode currently on <html>: no `data-theme` means "system". */
+export function currentColorMode(): ColorModeId {
+  const attr = document.documentElement.getAttribute("data-theme");
+  return isColorModeId(attr) ? attr : DEFAULT_COLOR_MODE;
+}
+
+/** Reconcile with the server-side setting once known (as for the theme). */
+export function syncColorModeFromSettings(mode: unknown): ColorModeId {
+  const next: ColorModeId = isColorModeId(mode) ? mode : DEFAULT_COLOR_MODE;
+  applyColorMode(next);
   return next;
 }

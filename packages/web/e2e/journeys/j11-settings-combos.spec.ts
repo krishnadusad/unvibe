@@ -147,6 +147,44 @@ test.describe("J11 settings combos", () => {
     await defaultSaved;
     await expect(page.locator("html")).toHaveAttribute("data-ui-theme", "default");
 
+    // Mode: with the system dark, Light pins the light set, survives a
+    // reload (boot script) and is saved; System hands back to the OS.
+    await page.emulateMedia({ colorScheme: "dark" });
+    const bodyBg = (): Promise<string> => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    const modeGroup = page.locator('[data-testid="color-mode"]');
+    await expect(modeGroup.locator('[data-mode="system"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.+/);
+    const darkBg = await bodyBg();
+    const lightSaved = page.waitForResponse(
+      (r) => r.url().includes("/api/settings") && r.request().method() !== "GET" && r.ok(),
+      { timeout: 15_000 },
+    );
+    await modeGroup.locator('[data-mode="light"]').click();
+    await lightSaved;
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    const lightBg = await bodyBg();
+    expect(lightBg).not.toBe(darkBg);
+    await page.reload();
+    await expect(page.getByRole("tablist", { name: "Settings sections" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    expect(await bodyBg()).toBe(lightBg);
+    const serverMode = await page.evaluate(async () => {
+      const token = new URLSearchParams(location.search).get("token") ?? "";
+      const r = await fetch("/api/settings", { headers: { authorization: `Bearer ${token}` } });
+      return ((await r.json()) as { colorMode?: string }).colorMode;
+    });
+    expect(serverMode).toBe("light");
+    await page.getByRole("tab", { name: "Appearance" }).click();
+    const systemSaved = page.waitForResponse(
+      (r) => r.url().includes("/api/settings") && r.request().method() !== "GET" && r.ok(),
+      { timeout: 15_000 },
+    );
+    await page.locator('[data-testid="color-mode"] [data-mode="system"]').click();
+    await systemSaved;
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.+/);
+    expect(await bodyBg()).toBe(darkBg);
+    await page.emulateMedia({ colorScheme: null });
+
     // Repos: add a second checkout in Settings, remove it, folder intact.
     await page.goto(`${svc.origin}/settings?token=${svc.token}`);
     await page.getByRole("tab", { name: "Repos" }).click();
