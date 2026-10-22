@@ -663,10 +663,13 @@ h1.title { font-family: var(--serif); font-weight: 600; font-size: var(--text-pa
 .ui-card.plotlines { padding: 8px 14px; }
 .plotlines h2 { font-size: 11px; color: var(--muted); font-weight: 600; margin: 6px 0 2px; letter-spacing: .08em; text-transform: uppercase; }
 .plotlines ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.plotlines li button { border: 0; background: none; padding: 2px 0; text-align: left; width: 100%; font-size: 13px; }
-.plotlines li button:hover .plname { text-decoration: underline; }
-.plotlines li button.sel { background: var(--sunk); border-radius: var(--radius-6); }
-.plotlines li button.sel .plname { text-decoration: underline; }
+/* Rows are role="button" divs, not <button>s, so their text stays
+   selectable and a plotline's name and description can be copied. */
+.plotlines .plpick { padding: 2px 0; font-size: 13px; cursor: pointer; }
+.plotlines .plpick:hover .plname { text-decoration: underline; }
+.plotlines .plpick:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
+.plotlines .plpick.sel { background: var(--sunk); border-radius: var(--radius-6); }
+.plotlines .plpick.sel .plname { text-decoration: underline; }
 .plotlines .plname { font-weight: 600; }
 .plotlines .pldesc { color: var(--muted); font-size: 12.5px; }
 .plotlines .plcount { color: var(--muted); font-size: 11.5px; margin-left: 6px; white-space: nowrap; }

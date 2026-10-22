@@ -69,7 +69,7 @@ describe("PageView plotlines", () => {
   it("jumps to the plotline's first hunk", async () => {
     await renderRoot();
     const box = document.querySelector(".plotlines")!;
-    const first = box.querySelectorAll("li button")[0];
+    const first = box.querySelectorAll("li [data-plotpick]")[0];
     expect(first.textContent).toContain("Unfold folded values");
     await fireEvent.click(first);
     const pending = takePendingReveal();
@@ -81,7 +81,7 @@ describe("PageView plotlines", () => {
   it("filters the diff to the plotline and reveals its first hunk", async () => {
     await renderRoot();
     const box = document.querySelector(".plotlines")!;
-    const first = box.querySelectorAll("li button")[0];
+    const first = box.querySelectorAll("li [data-plotpick]")[0];
     await fireEvent.click(first);
     // The stored filter is set (DiffView echoes it) and the reveal queued.
     await vi.waitFor(() => {

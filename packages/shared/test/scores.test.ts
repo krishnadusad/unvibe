@@ -9,6 +9,8 @@ import {
   MAX_PLOTLINES,
   normalizeHunkScore,
   normalizePlotlines,
+  PLOTLINE_DESCRIPTION_MAX,
+  PLOTLINE_NAME_MAX,
   PLOTLINE_OTHER_ID,
   resolveHunkScore,
 } from "../src/scores.js";
@@ -97,6 +99,25 @@ describe("normalizePlotlines", () => {
     expect(normalizePlotlines([], KNOWN).plotlines).toEqual([]);
     expect(normalizePlotlines(undefined, KNOWN).plotlines).toEqual([]);
     expect(normalizePlotlines({ plotlines: [] }, KNOWN).plotlines).toEqual([]);
+  });
+
+  it("keeps ordinary long names and descriptions whole", () => {
+    const name = "Route uploads through the resumable session endpoint";
+    const description =
+      "Swap the one-shot upload for a resumable session so a dropped connection picks up where it left off " +
+      "instead of restarting, and surface progress to the caller.";
+    const got = normalizePlotlines([{ name, description, hunks: [] }], KNOWN);
+    expect(got.plotlines[0]).toMatchObject({ name, description });
+  });
+
+  it("still caps runaway names and descriptions", () => {
+    const got = normalizePlotlines(
+      [{ name: "word ".repeat(100), description: "word ".repeat(400), hunks: [] }],
+      KNOWN,
+    );
+    expect(got.plotlines[0].name.length).toBeLessThanOrEqual(PLOTLINE_NAME_MAX + 1);
+    expect(got.plotlines[0].name.endsWith("…")).toBe(true);
+    expect(got.plotlines[0].description.length).toBeLessThanOrEqual(PLOTLINE_DESCRIPTION_MAX + 1);
   });
 
   it(`caps at ${MAX_PLOTLINES} plotlines`, () => {

@@ -144,6 +144,15 @@ function slugify(text: string): string {
   return slug === "" ? "plotline" : slug;
 }
 
+/**
+ * Plotline text caps. They only guard against runaway reader output: real
+ * names and one-line descriptions must arrive whole, because the guide
+ * shows (and the reader copies) exactly what is stored. The old 40/140
+ * caps cut ordinary names mid-phrase with "…".
+ */
+export const PLOTLINE_NAME_MAX = 120;
+export const PLOTLINE_DESCRIPTION_MAX = 500;
+
 function cleanLine(text: string, max: number): string {
   return truncateAtWordBoundary(text.replace(/\s+/g, " ").trim(), max);
 }
@@ -169,7 +178,7 @@ export function normalizePlotlines(input: unknown, known: ReadonlySet<string>): 
   for (const raw of input) {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
     const rec = raw as Record<string, unknown>;
-    const name = typeof rec["name"] === "string" ? cleanLine(rec["name"], 40) : "";
+    const name = typeof rec["name"] === "string" ? cleanLine(rec["name"], PLOTLINE_NAME_MAX) : "";
     if (name === "") continue;
     if (plotlines.length >= MAX_PLOTLINES) {
       extraPlotlines += 1;
@@ -180,7 +189,7 @@ export function normalizePlotlines(input: unknown, known: ReadonlySet<string>): 
     for (let n = 2; seenIds.has(id); n++) id = `${wantId}-${n}`;
     seenIds.add(id);
     const description =
-      typeof rec["description"] === "string" ? cleanLine(rec["description"], 140) : "";
+      typeof rec["description"] === "string" ? cleanLine(rec["description"], PLOTLINE_DESCRIPTION_MAX) : "";
     const buildsOnRaw = typeof rec["buildsOn"] === "string" && rec["buildsOn"].trim() !== "" ? slugify(rec["buildsOn"]) : undefined;
     const hunks = Array.isArray(rec["hunks"]) ? rec["hunks"] : [];
     for (const h of hunks) {

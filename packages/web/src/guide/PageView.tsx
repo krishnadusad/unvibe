@@ -119,6 +119,23 @@ function Plotlines({ reviewId }: { reviewId: string }): ReactNode {
         ]
       : []),
   ];
+  const pick = (id: string, ref: string): void => {
+    const active = snapshot?.diffFilter?.plotline === id;
+    const body = {
+      plotline: active ? null : id,
+      score: snapshot?.diffFilter?.score ?? null,
+    };
+    api
+      .updateDiffFilter(reviewId, body)
+      .then(() => {
+        // A plotline pick is a filter action (#190): jump to its first hunk
+        // without clearing the file tree's own filters.
+        if (!active) revealSource(ref, { keepFilters: true });
+      })
+      .catch(() => {
+        toast("Couldn't save the filter");
+      });
+  };
   return (
     <UiCard as="section" variant="inset" className="plotlines" aria-label="Plotlines">
       <h2>Plotlines</h2>
@@ -126,29 +143,27 @@ function Plotlines({ reviewId }: { reviewId: string }): ReactNode {
         {rows.map((r) => (
           <li key={r.id}>
             {r.ref ? (
-              <button
-                type="button"
-                className={snapshot?.diffFilter?.plotline === r.id ? "sel" : undefined}
+              // A div, not a <button>: the row text must stay selectable so a
+              // plotline's name can be copied, and Safari never selects text
+              // inside a <button>. Role, focus and Enter/Space keep it a button.
+              <div
+                role="button"
+                tabIndex={0}
+                className={snapshot?.diffFilter?.plotline === r.id ? "plpick sel" : "plpick"}
                 aria-pressed={snapshot?.diffFilter?.plotline === r.id}
                 data-plotpick={r.id}
                 data-tip={snapshot?.diffFilter?.plotline === r.id ? "Show all hunks" : `Show only ${r.name}`}
-                onClick={() => {
-                  const active = snapshot?.diffFilter?.plotline === r.id;
-                  const body = {
-                    plotline: active ? null : r.id,
-                    score: snapshot?.diffFilter?.score ?? null,
-                  };
-                  api
-                    .updateDiffFilter(reviewId, body)
-                    .then(() => {
-                      // A plotline pick is a filter action (#190):
-                      // jump to its first hunk without clearing the
-                      // file tree's own filters.
-                      if (!active) revealSource(r.ref as string, { keepFilters: true });
-                    })
-                    .catch(() => {
-                      toast("Couldn't save the filter");
-                    });
+                onClick={(e) => {
+                  // The click that ends a drag-selection inside the row is a
+                  // copy, not a pick.
+                  const sel = window.getSelection();
+                  if (sel && !sel.isCollapsed && e.currentTarget.contains(sel.anchorNode)) return;
+                  pick(r.id, r.ref as string);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  e.preventDefault();
+                  pick(r.id, r.ref as string);
                 }}
               >
                 {r.order !== undefined ? <span className="plorder">{r.order}. </span> : null}
@@ -158,7 +173,7 @@ function Plotlines({ reviewId }: { reviewId: string }): ReactNode {
                   {r.count} {r.count === 1 ? "hunk" : "hunks"}
                 </span>
                 {r.buildsOnName ? <span className="plbuilds">Builds on {r.buildsOnName}</span> : null}
-              </button>
+              </div>
             ) : (
               <span>
                 {r.order !== undefined ? <span className="plorder">{r.order}. </span> : null}
