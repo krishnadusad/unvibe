@@ -26,7 +26,10 @@ function webMetaPlugin(): Plugin {
   };
 }
 
-// Dev: the service runs on 127.0.0.1:4517 (UNVIBE_PORT); proxy API + WS there.
+// Dev: the service runs on 127.0.0.1:$UNVIBE_PORT (default 4517); proxy API + WS
+// there. Following UNVIBE_PORT lets dev run beside whatever else holds 4517.
+const servicePort = process.env.UNVIBE_PORT ?? "4517";
+
 export default defineConfig(({ command, mode }) => ({
   plugins: [react(), webMetaPlugin()],
   define: {
@@ -40,7 +43,7 @@ export default defineConfig(({ command, mode }) => ({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:4517",
+        target: `http://127.0.0.1:${servicePort}`,
         changeOrigin: false,
         ws: true,
       },
