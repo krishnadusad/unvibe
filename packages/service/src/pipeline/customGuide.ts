@@ -187,3 +187,55 @@ export function writeGuidePage(
 export function removeGuidePages(draft: WritableDraft<ReviewSnapshot>, guideId: string): void {
   draft.pages = draft.pages.filter((p) => p.guideId !== guideId);
 }
+
+// --- suggestions -------------------------------------------------------------
+
+/** Most hunk summaries sent to the suggestions prompt. */
+const SUGGESTION_HUNK_LIMIT = 60;
+
+/** Title plus the start of the description. */
+export function renderSuggestionChange(snap: ReviewSnapshot): string {
+  const title = snap.pages.find((p) => p.id === "root")?.title ?? snap.review.branch;
+  const body = (snap.description?.baseMarkdown ?? "").trim();
+  const excerpt = body.length > 1500 ? `${body.slice(0, 1500).trimEnd()}…` : body;
+  return excerpt ? `${title}\n\n${excerpt}` : title;
+}
+
+/** One line per file: path, category, size of the change. */
+export function renderSuggestionFiles(snap: ReviewSnapshot): string {
+  if (snap.files.length === 0) return "(none)";
+  return snap.files
+    .map((f) => {
+      const added = f.hunks.reduce((n, h) => n + h.added, 0);
+      const removed = f.hunks.reduce((n, h) => n + h.removed, 0);
+      return `- ${f.path} (${f.category}) +${added} −${removed}, ${f.hunks.length} hunk${f.hunks.length === 1 ? "" : "s"}`;
+    })
+    .join("\n");
+}
+
+/** The main guide's plotlines, one line each. */
+export function renderSuggestionPlotlines(snap: ReviewSnapshot): string {
+  const plotlines = snap.plotlines ?? [];
+  if (plotlines.length === 0) return "(none yet)";
+  return plotlines.map((p) => `- ${p.name}${p.description ? `: ${p.description}` : ""}`).join("\n");
+}
+
+const SCORE_ORDER: Record<string, number> = { "needs-attention": 0, substantive: 1, routine: 2, mechanical: 3 };
+
+/** Summarised hunks, most significant first, capped. */
+export function renderSuggestionHunks(snap: ReviewSnapshot): string {
+  const states = new Map(snap.hunkStates.map((s) => [s.contentHash, s]));
+  const rows = snap.files.flatMap((f) =>
+    f.hunks.flatMap((h) => {
+      const st = states.get(h.contentHash);
+      if (!st?.summary) return [];
+      return [{ path: f.path, score: st.score ?? "routine", summary: st.summary }];
+    }),
+  );
+  if (rows.length === 0) return "(no hunk summaries yet)";
+  rows.sort((a, b) => (SCORE_ORDER[a.score] ?? 2) - (SCORE_ORDER[b.score] ?? 2));
+  return rows
+    .slice(0, SUGGESTION_HUNK_LIMIT)
+    .map((r) => `- [${r.score}] ${r.path}: ${r.summary}`)
+    .join("\n");
+}

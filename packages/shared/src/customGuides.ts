@@ -161,6 +161,45 @@ export function customGuideFallbackTitle(prompt: string): string {
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line || "Custom guide";
 }
 
+/**
+ * Guide ideas for this change, offered as buttons in the New guide box.
+ * Written by a small-model job the first time the box opens for a
+ * version (`POST /api/reviews/:id/guides/suggestions`), then reused.
+ */
+export interface CustomGuideSuggestion {
+  /** Button text, a few words ("Today's commits", "Auth checks"). */
+  label: string;
+  /** The request the button fills in. */
+  prompt: string;
+}
+
+export interface CustomGuideSuggestions {
+  /** Review version the ideas were written for. */
+  version: number;
+  status: "working" | "ready" | "failed";
+  items: CustomGuideSuggestion[];
+  jobId?: string;
+}
+
+/** Most suggestions kept from one reply. */
+export const CUSTOM_GUIDE_MAX_SUGGESTIONS = 5;
+
+/** Valid suggestions from a reply's `suggestions` field, trimmed and capped. */
+export function normalizeGuideSuggestions(raw: unknown): CustomGuideSuggestion[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CustomGuideSuggestion[] = [];
+  for (const item of raw) {
+    const r = item as { label?: unknown; prompt?: unknown } | null;
+    if (typeof r?.label !== "string" || typeof r.prompt !== "string") continue;
+    const label = r.label.replace(/\s+/g, " ").trim().slice(0, 40);
+    const prompt = r.prompt.replace(/\s+/g, " ").trim().slice(0, CUSTOM_GUIDE_PROMPT_MAX);
+    if (label === "" || prompt === "" || out.some((s) => s.label === label)) continue;
+    out.push({ label, prompt });
+    if (out.length >= CUSTOM_GUIDE_MAX_SUGGESTIONS) break;
+  }
+  return out;
+}
+
 // --- API ---------------------------------------------------------------------
 
 /** POST /api/reviews/:id/guides */

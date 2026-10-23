@@ -1,9 +1,10 @@
 /**
  * Custom guides in the guide pane (packages/shared/src/customGuides.ts).
  *
- * - `GuideSwitcher`: the row above the guide: "Main guide" plus each
- *   custom guide (title + status), and "New guide", which opens a
- *   compact request box. With no custom guides only "New guide" shows.
+ * - `GuideControls`: right of the guide's heading: the guide picker
+ *   ("Main guide" plus each custom guide, once one exists) and "New
+ *   guide". `GuideComposerPanel`, under the heading, is the box it
+ *   opens: AI-written ideas for this change as buttons, and the request.
  * - `CustomGuideIntro`: on a custom guide's root, between its title and
  *   the cards: the request conversation, scope, and the guide's state
  *   (working, a question to answer, failed, out of date), plus a small
@@ -15,7 +16,7 @@
  *   `guideId` in step with the route, so the diff shows only the open
  *   guide's hunks.
  */
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { Annotation, CustomGuide } from "@unvibe/shared";
 import { CUSTOM_GUIDE_PROMPT_MAX } from "@unvibe/shared";
@@ -67,8 +68,11 @@ export function guideStatusLabel(guide: Pick<CustomGuide, "status" | "stale">): 
 }
 
 /**
- * Request box for a new guide or an answer: Enter sends, Shift+Enter is
- * a newline; the text is capped at `CUSTOM_GUIDE_PROMPT_MAX`.
+ * Request box for a new guide or an answer: one bordered box with an
+ * auto-growing text area and the send controls inside it. Enter sends,
+ * Shift+Enter is a newline, Escape cancels; the text is capped at
+ * `CUSTOM_GUIDE_PROMPT_MAX`. Pass `value`/`onValueChange` to fill it from
+ * outside (the suggestion buttons).
  */
 function PromptBox({
   ariaLabel,
@@ -76,6 +80,9 @@ function PromptBox({
   submitLabel,
   onSubmit,
   onCancel,
+  value,
+  onValueChange,
+  focusKey,
 }: {
   ariaLabel: string;
   placeholder: string;
@@ -83,18 +90,34 @@ function PromptBox({
   /** Resolves when sent; the box clears. Rejects to keep the text. */
   onSubmit: (text: string) => Promise<void>;
   onCancel?: () => void;
+  value?: string;
+  onValueChange?: (text: string) => void;
+  /** Changing it refocuses the box with the caret at the end. */
+  focusKey?: number;
 }): ReactNode {
-  const [text, setText] = useState("");
+  const [own, setOwn] = useState("");
+  const text = value ?? own;
+  const setText = onValueChange ?? setOwn;
   const [sending, setSending] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
-    ref.current?.focus();
-  }, []);
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [focusKey]);
+  // Grow with the text up to a cap, then scroll.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+  }, [text]);
   const send = (): void => {
-    const value = text.trim();
-    if (value === "" || sending) return;
+    const trimmed = text.trim();
+    if (trimmed === "" || sending) return;
     setSending(true);
-    onSubmit(value)
+    onSubmit(trimmed)
       .then(() => setText(""))
       .catch((err: unknown) => toast(friendlyError(err)))
       .finally(() => setSending(false));
@@ -110,10 +133,10 @@ function PromptBox({
   };
   const left = CUSTOM_GUIDE_PROMPT_MAX - text.length;
   return (
-    <div className="composer cg-composer">
+    <div className={`cg-box${sending ? " sending" : ""}`}>
       <textarea
         ref={ref}
-        rows={3}
+        rows={2}
         aria-label={ariaLabel}
         placeholder={placeholder}
         maxLength={CUSTOM_GUIDE_PROMPT_MAX}
@@ -122,8 +145,10 @@ function PromptBox({
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
       />
-      <div className="row">
-        {left < 200 ? <span className="hint cg-left">{left} left</span> : null}
+      <div className="cg-box-foot">
+        <span className="hint">
+          {left < 200 ? `${left} characters left` : "Enter to send · Shift+Enter for a new line"}
+        </span>
         {onCancel ? (
           <Button variant="quiet" size="sm" type="button" onClick={onCancel}>
             Cancel
@@ -143,14 +168,31 @@ function PromptBox({
   );
 }
 
-const NEW_GUIDE_PLACEHOLDER = [
-  "What should this guide cover? For example:",
-  "What changed in today's commits?",
-  "Security review: only hunks touching auth or input handling",
-  "Since commit <sha>",
-].join("\n");
+/** Whether the New guide box is open, per review (heading control + panel). */
+const composerOpen = new Map<string, boolean>();
+const composerListeners = new Set<() => void>();
 
-export function GuideSwitcher({
+function setComposerOpen(reviewId: string, open: boolean): void {
+  composerOpen.set(reviewId, open);
+  for (const l of composerListeners) l();
+}
+
+function useComposerOpen(reviewId: string): boolean {
+  return useSyncExternalStore(
+    (l) => {
+      composerListeners.add(l);
+      return () => composerListeners.delete(l);
+    },
+    () => composerOpen.get(reviewId) ?? false,
+  );
+}
+
+/**
+ * Right side of the guide's heading row: the guide picker ("Main guide"
+ * plus each custom guide, once one exists) and "New guide", which opens
+ * the request box under the heading.
+ */
+export function GuideControls({
   reviewId,
   activeGuideId,
 }: {
@@ -159,65 +201,128 @@ export function GuideSwitcher({
 }): ReactNode {
   const guides = useReview((s) => s.snapshot?.guides);
   const navigate = useNavigate();
-  const [composing, setComposing] = useState(false);
+  const open = useComposerOpen(reviewId);
   const list = guides ?? [];
+  return (
+    <div className="cg-controls" data-testid="guide-switcher">
+      {list.length > 0 ? (
+        <Select
+          aria-label="Guide"
+          data-testid="guide-select"
+          className="cg-select"
+          value={activeGuideId ?? MAIN}
+          onValueChange={(v) => navigate(guidePath(reviewId, v === MAIN ? null : v))}
+          options={[
+            { value: MAIN, label: "Main guide" },
+            ...list.map((g) => {
+              const status = guideStatusLabel(g);
+              return {
+                value: g.id,
+                label: (
+                  <span className="cg-opt">
+                    <span className="cg-opt-title">{g.title}</span>
+                    {status ? <span className="hint"> · {status}</span> : null}
+                  </span>
+                ),
+              };
+            }),
+          ]}
+        />
+      ) : null}
+      <Button
+        variant="secondary"
+        size="sm"
+        type="button"
+        className="cg-new"
+        aria-expanded={open}
+        data-tip="Ask for a focused guide over part of the change"
+        onClick={() => setComposerOpen(reviewId, !open)}
+      >
+        + New guide
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The New guide box under the heading: AI-written ideas for this change
+ * as buttons (asked for the first time the box opens on a version), and
+ * the request box. A button fills the box so the request can be edited
+ * before sending.
+ */
+export function GuideComposerPanel({ reviewId }: { reviewId: string }): ReactNode {
+  const open = useComposerOpen(reviewId);
+  const navigate = useNavigate();
+  const suggestions = useReview((s) => s.snapshot?.guideSuggestions);
+  const version = useReview((s) => s.snapshot?.version.n);
+  const [text, setText] = useState("");
+  const [focusKey, setFocusKey] = useState(0);
+  const asked = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || version === undefined) return;
+    const key = `${reviewId}:${version}`;
+    if (asked.current === key) return;
+    asked.current = key;
+    // Ideas are written once per version; the service reuses them.
+    api.suggestGuides(reviewId).catch(() => {
+      // No ideas: the box still works on its own.
+    });
+  }, [open, reviewId, version]);
+  if (!open) return null;
 
   const create = async (prompt: string): Promise<void> => {
     const res = await api.createGuide(reviewId, { prompt });
     justCreated.add(res.guide.id);
-    setComposing(false);
+    setComposerOpen(reviewId, false);
     navigate(guidePath(reviewId, res.guide.id));
   };
-
+  const current = suggestions && suggestions.version === version ? suggestions : undefined;
   return (
-    <div className="cg-bar" data-testid="guide-switcher">
-      <div className="cg-bar-row">
-        {list.length > 0 ? (
-          <Select
-            aria-label="Guide"
-            data-testid="guide-select"
-            className="cg-select"
-            value={activeGuideId ?? MAIN}
-            onValueChange={(v) => navigate(guidePath(reviewId, v === MAIN ? null : v))}
-            options={[
-              { value: MAIN, label: "Main guide" },
-              ...list.map((g) => {
-                const status = guideStatusLabel(g);
-                return {
-                  value: g.id,
-                  label: (
-                    <span className="cg-opt">
-                      <span className="cg-opt-title">{g.title}</span>
-                      {status ? <span className="hint"> · {status}</span> : null}
-                    </span>
-                  ),
-                };
-              }),
-            ]}
-          />
-        ) : null}
-        <Button
-          variant="quiet"
-          size="sm"
-          type="button"
-          className="cg-new"
-          aria-expanded={composing}
-          data-tip="Ask for a guide over part of the change"
-          onClick={() => setComposing((v) => !v)}
-        >
-          + New guide
-        </Button>
+    <UiCard as="section" variant="inset" className="cg-panel" aria-label="New guide">
+      <div className="cg-panel-h">
+        <h2>New guide</h2>
+        <span className="hint">A focused view of part of this change; the main guide stays as it is.</span>
       </div>
-      {composing ? (
-        <PromptBox
-          ariaLabel="New guide request"
-          placeholder={NEW_GUIDE_PLACEHOLDER}
-          submitLabel="Create"
-          onSubmit={create}
-          onCancel={() => setComposing(false)}
-        />
-      ) : null}
-    </div>
+      <div className="cg-ideas" aria-label="Ideas for this change" data-testid="guide-ideas">
+        {current?.status === "ready"
+          ? current.items.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                className="cg-idea"
+                data-tip={item.prompt}
+                onClick={() => {
+                  setText(item.prompt);
+                  setFocusKey((k) => k + 1);
+                }}
+              >
+                {item.label}
+              </button>
+            ))
+          : current?.status === "failed" || !current
+            ? null
+            : (
+                <span className="cg-ideas-loading" role="status">
+                  <span className="dots" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  Thinking of guides for this change…
+                </span>
+              )}
+      </div>
+      <PromptBox
+        ariaLabel="New guide request"
+        placeholder="Describe the guide: what to include and what to look for"
+        submitLabel="Create guide"
+        value={text}
+        onValueChange={setText}
+        focusKey={focusKey}
+        onSubmit={create}
+        onCancel={() => setComposerOpen(reviewId, false)}
+      />
+    </UiCard>
   );
 }
 

@@ -29,7 +29,7 @@ import type {
   TokenUsage,
 } from "@unvibe/shared";
 import { canonicalizeTarget, collectTargets, DEFAULT_GUIDE_TITLE, isDocumentReview, JOB_PRIORITY, normalizePlotlines, parseCards, parseCardsPartial, parseHunkReply, parseId, PLOTLINE_ASSIGN_CAP, resolveHunkScore, splitReply } from "@unvibe/shared";
-import { customGuideCardId, isCustomGuidePage, postureFor } from "@unvibe/shared";
+import { customGuideCardId, isCustomGuidePage, normalizeGuideSuggestions, postureFor } from "@unvibe/shared";
 import type { HunkReplyResult } from "@unvibe/shared";
 import { attachPartialUsage, DegradedConnError, DegradedTurnError, partialUsageOf, RetryableError, type PartialUsageCarrier } from "../jobs/errors.js";
 import type { JobQueue } from "../jobs/index.js";
@@ -50,7 +50,7 @@ import type { CommandRunner } from "../exec/index.js";
 import { validateReply } from "../validate/index.js";
 import { lookupForSnapshot, resolveCodeFileExistence } from "./lookup.js";
 import { createSuggestedCommentInDraft } from "../comments/threads.js";
-import { applyCustomGuideReply, guideClarifyQuestion, renderGuideClock, renderGuideCommits, renderGuideRequest, writeGuidePage } from "./customGuide.js";
+import { applyCustomGuideReply, guideClarifyQuestion, renderGuideClock, renderGuideCommits, renderGuideRequest, renderSuggestionChange, renderSuggestionFiles, renderSuggestionHunks, renderSuggestionPlotlines, writeGuidePage } from "./customGuide.js";
 import { buildDocumentBaseText } from "../document/map.js";
 import { resolveDocumentCodeExistence } from "../document/resolve.js";
 import { criticApplyAll, isDefaultReaderCardId, readerApply, readerCardId, splitFinalizedBlocks } from "./apply.js";
@@ -1036,6 +1036,62 @@ export class Pipeline {
       .catch(async (err: unknown) => {
         rejectJob(err instanceof Error ? err : new Error(String(err)));
         await fail(err);
+      });
+    return jobReady;
+  }
+
+  /**
+   * Guide ideas for the New guide box: one small-model turn over the
+   * change's title, commits, files, plotlines and hunk summaries. Runs at
+   * most once per version (a ready or running set for the current version
+   * is reused; a failed one is retried). Returns null when nothing ran.
+   */
+  async suggestCustomGuides(reviewId: string): Promise<Job | null> {
+    const snapshot = this.opts.reviews.getSnapshot(reviewId);
+    if (!snapshot) throw new Error(`unknown review ${reviewId}`);
+    const current = snapshot.guideSuggestions;
+    if (current && current.version === snapshot.version.n && current.status !== "failed") return null;
+    const version = snapshot.version.n;
+    let resolveJob!: (job: Job | null) => void;
+    const jobReady = new Promise<Job | null>((res) => {
+      resolveJob = res;
+    });
+    const run = this.runSmall({
+      reviewId,
+      kind: "guide-suggestions",
+      template: "custom_guide_suggestions",
+      variables: {
+        change: renderSuggestionChange(snapshot),
+        now: renderGuideClock(),
+        commits: renderGuideCommits(snapshot.commits ?? []),
+        files: renderSuggestionFiles(snapshot),
+        plotlines: renderSuggestionPlotlines(snapshot),
+        hunks: renderSuggestionHunks(snapshot),
+      },
+      priority: JOB_PRIORITY.visible,
+      dedupeKey: { anchor: "guide-suggestions", requestKind: "guide-suggestions", baseVersion: `v${version}` },
+      replay: { kind: "guide-suggestions" },
+      onJob: (j) => {
+        resolveJob(j);
+        void this.opts.reviews.mutate(reviewId, (draft) => {
+          draft.guideSuggestions = { version, status: "working", items: [], jobId: j.id };
+        });
+      },
+    });
+    run
+      .then(async (result) => {
+        const items = normalizeGuideSuggestions(result.data?.["suggestions"]);
+        await this.opts.reviews.mutate(reviewId, (draft) => {
+          if (draft.guideSuggestions?.version !== version) return;
+          draft.guideSuggestions = { version, status: items.length > 0 ? "ready" : "failed", items };
+        });
+      })
+      .catch(async () => {
+        resolveJob(null);
+        await this.opts.reviews.mutate(reviewId, (draft) => {
+          if (draft.guideSuggestions && draft.guideSuggestions.version !== version) return;
+          draft.guideSuggestions = { version, status: "failed", items: [] };
+        });
       });
     return jobReady;
   }

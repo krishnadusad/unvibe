@@ -9,6 +9,8 @@
  *   the current version (also the retry after a failure).
  * - `DELETE …/guides/:guideId` — remove the guide, its pages and its
  *   suggested comments not yet marked for the PR; cancels a running job.
+ * - `POST …/guides/suggestions` — guide ideas for the New guide box,
+ *   written once per version by a small-model job (200 when reused).
  */
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -95,6 +97,15 @@ export async function registerGuides(app: FastifyInstance, ctx: ServiceContext, 
       draft.guides = [...(draft.guides ?? []), guide];
     });
     return start(reply, id, guideId);
+  });
+
+  app.post("/api/reviews/:id/guides/suggestions", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!guard(reply, id)) return reply;
+    if (!deps.pipeline) return reply.code(503).send({ error: "the agent pipeline is not running" });
+    const job = await deps.pipeline.suggestCustomGuides(id);
+    const suggestions = ctx.reviews.getSnapshot(id)?.guideSuggestions ?? null;
+    return reply.code(job ? 202 : 200).send({ suggestions, ...(job ? { jobId: job.id } : {}) });
   });
 
   app.post("/api/reviews/:id/guides/:guideId/answer", async (req, reply) => {

@@ -35,8 +35,10 @@ interface Props {
    * plotlines, and `intro` / `outro` frame the cards.
    */
   guide?: CustomGuide;
-  /** Above the trail (the guides switcher). */
-  top?: ReactNode;
+  /** Right end of the title row on guide-level pages (the guide picker and "New guide"). */
+  titleAside?: ReactNode;
+  /** Right under the title row (the New guide box when open). */
+  belowTitle?: ReactNode;
   /** Between the title and Contents (a custom guide's request and state). */
   intro?: ReactNode;
   /** After the cards (a custom guide's suggested comments). */
@@ -214,7 +216,7 @@ function GuidePlotlines({ reviewId, guide }: { reviewId: string; guide: CustomGu
   );
 }
 
-export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard, guide, top, intro, outro }: Props) {
+export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard, guide, titleAside, belowTitle, intro, outro }: Props) {
   const [tocOpen, setTocOpen] = useState(true);
   const { title: identityTitle } = useReviewIdentity(reviewId);
   const isFinding = page.kind === "finding";
@@ -301,9 +303,11 @@ export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard,
   const titleFor = (p: Page): string =>
     p.id === page.id ? rootTitle : p.kind === "root" && isDefaultGuideTitle(p.title) ? rootTitle : displayTitle(p.title);
 
+  // Guide controls live on guide-level pages only (the main guide's root
+  // and a custom guide's root), never on concept or finding pages.
+  const guideLevel = page.kind === "root" || page.kind === "guide";
   return (
     <div className={`doc${isFinding ? " finding" : ""}`}>
-      {top}
       {trail.length > 1 ? (
         <nav className="crumbs" aria-label="Trail">
           {trail.map((p, i) =>
@@ -323,7 +327,9 @@ export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard,
       {eyebrow ? <div className={`eyebrow${isFinding ? " find" : ""}`}>{eyebrow}</div> : null}
       <div className="title-row">
         <h1 className="title">{rootTitle}</h1>
+        {guideLevel ? titleAside : null}
       </div>
+      {guideLevel ? belowTitle : null}
       {isFinding && page.summary ? <div className="meta">{page.summary}</div> : null}
       <RecheckStatus page={page} />
       {conceptWorking ? (

@@ -17,6 +17,7 @@ import type {
   CreateCustomGuideRequest,
   CreateDocumentRequest,
   CustomGuideResponse,
+  CustomGuideSuggestions,
   CreateReviewRequest,
   CreateReviewResponse,
   DeleteContributionResponse,
@@ -369,6 +370,9 @@ const realApi = {
   /** Answer a custom guide's clarifying question; generation continues. */
   answerGuide: (id: string, guideId: string, body: AnswerCustomGuideRequest): Promise<CustomGuideResponse> =>
     post(`/api/reviews/${encodeURIComponent(id)}/guides/${encodeURIComponent(guideId)}/answer`, body),
+  /** Guide ideas for the New guide box (written once per version, then reused). */
+  suggestGuides: (id: string): Promise<{ suggestions: CustomGuideSuggestions | null; jobId?: string }> =>
+    post(`/api/reviews/${encodeURIComponent(id)}/guides/suggestions`),
   regenerateGuide: (id: string, guideId: string): Promise<CustomGuideResponse> =>
     post(`/api/reviews/${encodeURIComponent(id)}/guides/${encodeURIComponent(guideId)}/regenerate`),
   /** Remove a custom guide, its pages and its suggested comments not marked for the PR. */

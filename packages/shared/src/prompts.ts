@@ -23,6 +23,7 @@ export const PROMPT_TEMPLATE_NAMES = [
   "diagram",
   "go_deeper",
   "custom_guide",
+  "custom_guide_suggestions",
   "update_pass",
   "consolidate",
   "second_opinion_blind",

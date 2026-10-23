@@ -950,6 +950,7 @@ export interface ReviewViewPrefs {
 export type JobKind =
   | "reader"
   | "custom-guide"
+  | "guide-suggestions"
   | "critic"
   | "hunk-pass"
   | "concept"

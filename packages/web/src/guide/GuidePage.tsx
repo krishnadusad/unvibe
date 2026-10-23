@@ -27,7 +27,7 @@ import { GUIDE_BLOCK_EVENT, performAction, scrollToBlock, type GuideBlockRequest
 import { emptyGuideState } from "./guideUtils.js";
 import { DocumentView } from "./DocumentView.js";
 import { guidePagePath, parseGuideSplat } from "./customGuideRoutes.js";
-import { CustomGuideIntro, GuideSwitcher, isJustCreatedGuide, settleJustCreatedGuide, SuggestedComments } from "./CustomGuides.js";
+import { CustomGuideIntro, GuideComposerPanel, GuideControls, isJustCreatedGuide, settleJustCreatedGuide, SuggestedComments } from "./CustomGuides.js";
 import { PageView } from "./PageView.js";
 import { Button, PaneLoading } from "../ui/index.js";
 import "./guide-m2.css";
@@ -216,14 +216,16 @@ export function GuidePage({ reviewId }: { reviewId: string }) {
     );
   }
 
-  const switcher = <GuideSwitcher reviewId={reviewId} activeGuideId={guideId} />;
+  const titleAside = <GuideControls reviewId={reviewId} activeGuideId={guideId} />;
+  const belowTitle = <GuideComposerPanel reviewId={reviewId} />;
   if (guideId !== null) {
     return (
       <CustomGuidePane
         reviewId={reviewId}
         guideId={guideId}
         pageId={pageId}
-        switcher={switcher}
+        titleAside={titleAside}
+        belowTitle={belowTitle}
         lookupPage={lookupPage}
         onOpenPage={onOpenPage}
         onJumpToCard={onJumpToCard}
@@ -310,7 +312,8 @@ export function GuidePage({ reviewId }: { reviewId: string }) {
           lookupPage={lookupPage}
           onOpenPage={onOpenPage}
           onJumpToCard={onJumpToCard}
-          top={switcher}
+          titleAside={titleAside}
+          belowTitle={belowTitle}
         />
       </ErrorBoundary>
     </>
@@ -326,7 +329,8 @@ function CustomGuidePane({
   reviewId,
   guideId,
   pageId,
-  switcher,
+  titleAside,
+  belowTitle,
   lookupPage,
   onOpenPage,
   onJumpToCard,
@@ -334,7 +338,8 @@ function CustomGuidePane({
   reviewId: string;
   guideId: string;
   pageId: string | null;
-  switcher: ReactNode;
+  titleAside: ReactNode;
+  belowTitle: ReactNode;
   lookupPage: (id: string) => Page | undefined;
   onOpenPage: (id: string | null) => void;
   onJumpToCard: (cardId: string) => void;
@@ -354,8 +359,10 @@ function CustomGuidePane({
     }
     return (
       <div className="doc" data-testid="guide-missing">
-        {switcher}
-        <h1 className="title">Guide not found</h1>
+        <div className="title-row">
+          <h1 className="title">Guide not found</h1>
+          {titleAside}
+        </div>
         <p className="hint">
           This custom guide is gone (it may have been deleted).{" "}
           <button type="button" className="x" onClick={() => onOpenPage(null)}>
@@ -372,7 +379,6 @@ function CustomGuidePane({
   if (!page) {
     return (
       <div className="doc">
-        {switcher}
         <PaneLoading label="Opening the page" />
       </div>
     );
@@ -394,7 +400,8 @@ function CustomGuidePane({
         onOpenPage={onOpenPage}
         onJumpToCard={onJumpToCard}
         guide={guide}
-        top={switcher}
+        titleAside={titleAside}
+        belowTitle={belowTitle}
         intro={isRoot ? <CustomGuideIntro reviewId={reviewId} guide={guide} /> : undefined}
         outro={isRoot ? <SuggestedComments reviewId={reviewId} guide={guide} /> : undefined}
       />

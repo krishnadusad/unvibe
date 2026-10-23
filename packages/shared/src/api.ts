@@ -32,7 +32,7 @@ import type {
   Version,
 } from "./entities.js";
 import type { DiffFilter, HunkScoreLevel, Plotline, ReviewCommit } from "./scores.js";
-import type { CustomGuide } from "./customGuides.js";
+import type { CustomGuide, CustomGuideSuggestions } from "./customGuides.js";
 
 /** Health is the only unauthenticated route. */
 export interface HealthResponse {
@@ -327,6 +327,8 @@ interface ReviewSnapshotBase {
   plotlines?: Plotline[];
   /** Custom guides the reader prompted, oldest first (customGuides.ts). */
   guides?: CustomGuide[];
+  /** Guide ideas for the New guide box (customGuides.ts). */
+  guideSuggestions?: CustomGuideSuggestions;
   /**
    * Issue #169: the diff's score/plotline filter, remembered with the
    * review. Absent = all hunks (no filtering).

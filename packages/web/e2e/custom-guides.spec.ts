@@ -45,6 +45,25 @@ test("the main guide shows only a New guide affordance until a guide exists", as
   await expect(page.getByTestId("guide-select")).toHaveCount(0);
 });
 
+test("New guide sits on the heading row and offers AI ideas that fill the box", async ({ page }) => {
+  const row = page.locator(".title-row").first();
+  await expect(row.locator("h1.title")).toBeVisible();
+  await expect(row.getByRole("button", { name: "+ New guide" })).toBeVisible();
+  await row.getByRole("button", { name: "+ New guide" }).click();
+  const panel = page.getByRole("region", { name: "New guide" });
+  await expect(panel).toBeVisible();
+  // Ideas arrive after a short working state and are buttons.
+  const ideas = page.getByTestId("guide-ideas");
+  await expect(ideas.getByRole("button", { name: "Injection risks" })).toBeVisible();
+  await ideas.getByRole("button", { name: "Injection risks" }).click();
+  const box = page.getByRole("textbox", { name: "New guide request" });
+  await expect(box).toHaveValue(/Security review: can a header value still carry/);
+  await expect(box).toBeFocused();
+  // Escape closes the box.
+  await box.press("Escape");
+  await expect(panel).toHaveCount(0);
+});
+
 test("a new guide streams in, scopes the diff, and filters by its own plotlines", async ({ page }) => {
   await createGuide(page, "Security review: only the header parsing");
   const intro = page.locator(".cg-intro");

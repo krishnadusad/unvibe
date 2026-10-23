@@ -20,6 +20,8 @@ import type {
   AddRepoResponse,
   CustomGuide,
   CustomGuideResponse,
+  CustomGuideSuggestion,
+  CustomGuideSuggestions,
   ChangesFilter,
   Contribution,
   CreateDocumentRequest,
@@ -945,6 +947,7 @@ export function resetMockState(): void {
   mockSoSeq = 0;
   mockDiffFilter = undefined;
   mockGuides = [];
+  mockGuideSuggestions = undefined;
   mockGuideSeq = 0;
   for (const p of pendingSecondOpinions) window.clearTimeout(p.timer);
   pendingSecondOpinions = [];
@@ -1139,6 +1142,7 @@ function currentSnapshot(reviewId = "demo", version?: number): ReviewSnapshot {
     plotlines: [...MOCK_PLOTLINES],
     ...(mockDiffFilter !== undefined ? { diffFilter: { ...mockDiffFilter } } : {}),
     ...(reviewId === "demo" && mockGuides.length > 0 ? { guides: JSON.parse(JSON.stringify(mockGuides)) as CustomGuide[] } : {}),
+    ...(reviewId === "demo" && mockGuideSuggestions ? { guideSuggestions: JSON.parse(JSON.stringify(mockGuideSuggestions)) as CustomGuideSuggestions } : {}),
   };
   if (stale && viewing === 2) base.versionStatus = staleVersionStatus();
   return base;
@@ -1978,7 +1982,38 @@ function mockGuideResponse(guideId: string, jobId?: string): CustomGuideResponse
   return { guide: JSON.parse(JSON.stringify(guide)) as CustomGuide, ...(jobId !== undefined ? { jobId } : {}) };
 }
 
+/** Mock guide ideas: a short "working" state, then ideas for the demo change. */
+let mockGuideSuggestions: CustomGuideSuggestions | undefined;
+const MOCK_SUGGESTIONS: CustomGuideSuggestion[] = [
+  { label: "Header unfolding", prompt: "Explain how folded header values are unfolded and which inputs still pass through unchanged." },
+  { label: "Injection risks", prompt: "Security review: can a header value still carry a CR or LF into the request? Only the hunks that build or validate headers." },
+  { label: "What the tests prove", prompt: "Walk through the new tests: what each one proves about unfolding and which edge cases are not covered." },
+  { label: "Today's commits", prompt: "What changed in today's commits?" },
+];
+
+function emitGuideSuggestions(): void {
+  const baseRev = rev;
+  rev += 1;
+  useReview.getState().applyEvent({
+    type: "patch",
+    baseRev,
+    headRev: rev,
+    ops: [{ op: "add", path: "/guideSuggestions", value: JSON.parse(JSON.stringify(mockGuideSuggestions)) }],
+  });
+}
+
 const mockGuideApi = {
+  suggestGuides: async (): Promise<{ suggestions: CustomGuideSuggestions | null; jobId?: string }> => {
+    await wait(40);
+    if (mockGuideSuggestions && mockGuideSuggestions.status !== "failed") return { suggestions: mockGuideSuggestions };
+    mockGuideSuggestions = { version: 1, status: "working", items: [] };
+    emitGuideSuggestions();
+    setTimeout(() => {
+      mockGuideSuggestions = { version: 1, status: "ready", items: MOCK_SUGGESTIONS };
+      emitGuideSuggestions();
+    }, 600);
+    return { suggestions: mockGuideSuggestions };
+  },
   createGuide: async (_id: string, body: { prompt: string }): Promise<CustomGuideResponse> => {
     await wait(80);
     const prompt = mockGuideText(body.prompt);

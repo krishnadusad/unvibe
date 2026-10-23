@@ -229,4 +229,31 @@ describe("custom guides", () => {
       await app.close();
     }
   });
+
+  it("writes guide ideas once per version and reuses them", { timeout: 90000 }, async () => {
+    const agents = new FakeAgentRunner([
+      { match: "reply with exactly", events: textEvents("ready") },
+      { match: "# Reader task", events: textEvents(MINIMAL_READER) },
+      {
+        match: "# Custom guide ideas",
+        events: textEvents(
+          '```json\n{"suggestions": [{"label": "Header unfolding", "prompt": "Explain how folded headers are unfolded."}, {"label": "", "prompt": "dropped"}]}\n```\n',
+        ),
+      },
+    ]);
+    const { app, ctx, id } = await openDemo(agents);
+    try {
+      const first = await inject(app, "POST", `/api/reviews/${id}/guides/suggestions`);
+      expect(first.status).toBe(202);
+      await waitFor(() => ctx.reviews.getSnapshot(id)?.guideSuggestions?.status === "ready");
+      expect(ctx.reviews.getSnapshot(id)!.guideSuggestions!.items).toEqual([
+        { label: "Header unfolding", prompt: "Explain how folded headers are unfolded." },
+      ]);
+      const again = await inject(app, "POST", `/api/reviews/${id}/guides/suggestions`);
+      expect(again.status).toBe(200);
+      expect(agents.prompts.filter((p) => p.text.includes("# Custom guide ideas"))).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
 });

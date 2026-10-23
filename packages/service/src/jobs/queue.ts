@@ -47,7 +47,7 @@ export const DEFAULT_BACKOFF_MAX_MS = 60_000;
  * rate limits still surface as retryable errors and back off through
  * the usual schedule.
  */
-const SMALL_JOB_KINDS: ReadonlySet<JobKind> = new Set(["hunk-pass", "summarize", "consolidate"]);
+const SMALL_JOB_KINDS: ReadonlySet<JobKind> = new Set(["hunk-pass", "summarize", "consolidate", "guide-suggestions"]);
 export const INTERRUPTED_MESSAGE = "stopped because the service restarted — retry to run it again";
 
 /** Context handed to a job's `run` function. */
