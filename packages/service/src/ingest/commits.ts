@@ -66,7 +66,16 @@ export function buildReviewCommits(
         }
       }
     }
-    return { sha: m.sha, subject: m.subject, body: m.body, files: commitFiles, hunks };
+    return {
+      sha: m.sha,
+      subject: m.subject,
+      body: m.body,
+      author: m.author,
+      authorDate: m.authorDate,
+      committerDate: m.committerDate,
+      files: commitFiles,
+      hunks,
+    };
   });
 }
 

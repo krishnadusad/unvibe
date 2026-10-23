@@ -7,6 +7,7 @@ import { registerDescription } from "./description.js";
 import type { RouteDeps } from "./deps.js";
 import { registerEvents } from "./events.js";
 import { registerFileSlices } from "./files.js";
+import { registerGuides } from "./guides.js";
 import { registerHunks } from "./hunks.js";
 import { registerOutline } from "./outline.js";
 import { registerJobs } from "./jobs.js";
@@ -46,6 +47,7 @@ export async function registerRoutes(
   await registerReviews(app, ctx, deps);
   await registerDiagrams(app, ctx, deps);
   await registerHunks(app, full as unknown as ServiceContext, full as unknown as RouteDeps);
+  await registerGuides(app, full as unknown as ServiceContext, full as unknown as RouteDeps);
   await registerFileSlices(app, ctx);
   await registerOutline(app, ctx);
   await registerComments(app, ctx);

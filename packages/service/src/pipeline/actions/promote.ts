@@ -73,7 +73,9 @@ export async function promoteAction(
       // they move to the page with the answer (issue #152).
       ...(turn.secondOpinions ? { secondOpinions: JSON.parse(JSON.stringify(turn.secondOpinions)) as Card["secondOpinions"] } : {}),
     }));
-    draft.pages.push({ id: pageId, kind: "opened-expansion", title, parent, cards });
+    // A page opened from a custom guide belongs to that guide.
+    const guideId = draft.pages.find((p) => p.id === parent)?.guideId;
+    draft.pages.push({ id: pageId, kind: "opened-expansion", title, parent, cards, ...(guideId ? { guideId } : {}) });
     // The anchor becomes a link to the new page (prototype `link` block).
     ann.type = "link";
     ann.open = false;

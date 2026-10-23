@@ -67,7 +67,7 @@ import {
   type TemplateLibrary,
 } from "../prompts/index.js";
 import { renderSystemPrompt } from "../prompts/access.js";
-import { accessModeOf, type AccessMode } from "@unvibe/shared";
+import { accessModeOf, isCustomGuidePage, type AccessMode } from "@unvibe/shared";
 import { formatContributionLines } from "../sharedctx/contributions.js";
 import { currentDescriptionHtml, parseDescriptionParagraphs } from "../ingest/description.js";
 
@@ -119,7 +119,9 @@ function hunkIsCited(
  * whatever the section.
  */
 export function guideRevisionForSnapshot(snap: ReviewSnapshot): string {
-  const shape = snap.pages.map((p) => [
+  // Custom guides are not part of the main guide: their cards streaming
+  // in must not key a new base for every later fork.
+  const shape = snap.pages.filter((p) => !isCustomGuidePage(p)).map((p) => [
     p.id,
     p.kind,
     p.title,
@@ -200,6 +202,7 @@ export function toPromptSnapshot(
   const states = new Map(snap.hunkStates.map((s) => [s.contentHash, s]));
   const cited = new Set<string>();
   for (const page of snap.pages) {
+    if (isCustomGuidePage(page)) continue;
     for (const card of page.cards) {
       const targets = collectTargets(card.blocks);
       for (const t of [...targets.citations, ...targets.links]) cited.add(t);

@@ -25,7 +25,7 @@ import type {
   TokenUsage,
   UpdatePassResult,
 } from "@unvibe/shared";
-import { JOB_PRIORITY } from "@unvibe/shared";
+import { isCustomGuidePage, JOB_PRIORITY } from "@unvibe/shared";
 import {
   charTokenEstimator,
   countCodePoints,
@@ -127,6 +127,8 @@ export function buildUpdateVariables(
 
   const staleCards: string[] = [];
   for (const page of snapshot.pages) {
+    // Custom guides regenerate instead of being revised here.
+    if (isCustomGuidePage(page)) continue;
     for (const card of page.cards) {
       if (card.stale === true) {
         const n = card.staleChangedHunks ?? card.staleHunks?.length ?? 0;

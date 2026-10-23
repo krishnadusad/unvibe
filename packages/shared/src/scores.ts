@@ -82,6 +82,10 @@ export interface ReviewCommit {
   sha: string;
   subject: string;
   body: string;
+  /** Author name, and author / committer dates (ISO 8601 with offset). */
+  author: string;
+  authorDate: string;
+  committerDate: string;
   /** Changed paths (new-side), in diff order. */
   files: string[];
   /** Canonical `h:<fileKey>:<hash>` PR hunk IDs this commit touches. */
@@ -224,6 +228,11 @@ export interface DiffFilter {
   plotline?: string;
   /** Score level. Absent = all. */
   score?: HunkScoreLevel;
+  /**
+   * Custom guide being viewed: only its hunks show, and `plotline` names
+   * one of that guide's plotlines rather than the main guide's.
+   */
+  guideId?: string;
 }
 
 /**

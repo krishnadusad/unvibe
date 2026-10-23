@@ -22,6 +22,7 @@ export const PROMPT_TEMPLATE_NAMES = [
   "examples",
   "diagram",
   "go_deeper",
+  "custom_guide",
   "update_pass",
   "consolidate",
   "second_opinion_blind",

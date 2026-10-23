@@ -201,7 +201,8 @@ export interface FileState {
   folded: boolean;
 }
 
-export type PageKind = "root" | "concept" | "finding" | "opened-expansion";
+/** `"guide"`: the root page of a custom guide (see customGuides.ts). */
+export type PageKind = "root" | "concept" | "finding" | "opened-expansion" | "guide";
 
 /** A guide page: root, concept, finding, or opened expansion. */
 export interface Page {
@@ -210,6 +211,11 @@ export interface Page {
   title: string;
   /** Parent page id for the breadcrumb trail; absent on root. */
   parent?: string;
+  /**
+   * Custom guide this page belongs to. Absent on main-guide pages; such
+   * pages are left out of the main guide's context and update pass.
+   */
+  guideId?: string;
   /** Finding-only: confidence label shown as "Agent finding · <confidence>". */
   confidence?: string;
   /** Finding-only: one-line summary shown on the finding-ref card. */
@@ -536,6 +542,11 @@ export interface Annotation {
   messages: ChatMessage[];
   /** Comments only: include in the Outbox (Submit review payload on PR reviews). */
   post: boolean;
+  /**
+   * Custom guide that suggested this comment. It shows only inside that
+   * guide until the reader marks it for the PR (`post`).
+   */
+  guideId?: string;
   /** Comments only: editable draft of the text to post (Outbox view). */
   draft?: string;
   /** Unsent reply-box content (survives re-renders; comments and conversations). */
@@ -938,6 +949,7 @@ export interface ReviewViewPrefs {
 
 export type JobKind =
   | "reader"
+  | "custom-guide"
   | "critic"
   | "hunk-pass"
   | "concept"

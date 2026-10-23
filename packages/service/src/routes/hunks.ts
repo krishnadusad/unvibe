@@ -15,6 +15,8 @@
  * - `PATCH /api/reviews/:id/diff-filter` — the diff's score/plotline
  *   filter (issue #169), remembered with the review. Each field is a
  *   plotline id (or "other") / score level; explicit null clears it.
+ *   `guideId` scopes the diff to a custom guide's hunks; its plotline ids
+ *   then come from that guide.
  */
 import type { FastifyInstance } from "fastify";
 import { normalizeHunkScore, PLOTLINE_OTHER_ID } from "@unvibe/shared";
@@ -142,14 +144,17 @@ export async function registerHunks(
     if (typeof body !== "object" || Array.isArray(body)) {
       return reply.code(400).send({ error: "invalid filter body" });
     }
-    const { plotline, score } = body;
+    const { plotline, score, guideId } = body;
     if (plotline !== undefined && plotline !== null && typeof plotline !== "string") {
       return reply.code(400).send({ error: "plotline must be a plotline or null" });
     }
     if (score !== undefined && score !== null && normalizeHunkScore(score) === null) {
       return reply.code(400).send({ error: "score must be mechanical, routine, substantive or needs-attention" });
     }
-    if (plotline === undefined && score === undefined) {
+    if (guideId !== undefined && guideId !== null && typeof guideId !== "string") {
+      return reply.code(400).send({ error: "guideId must be a custom guide id or null" });
+    }
+    if (plotline === undefined && score === undefined && guideId === undefined) {
       return reply.code(400).send({ error: "nothing to update" });
     }
 
@@ -157,14 +162,27 @@ export async function registerHunks(
     if (!snapshot) return reply.code(404).send({ error: "unknown review" });
     const refused = ingestRefusal(snapshot);
     if (refused) return reply.code(409).send({ error: refused });
+    if (typeof guideId === "string" && !(snapshot.guides ?? []).some((g) => g.id === guideId)) {
+      return reply.code(400).send({ error: `unknown custom guide ${guideId}` });
+    }
+    // Plotline ids belong to the guide in effect after this patch.
+    const effectiveGuide = guideId === undefined ? snapshot.diffFilter?.guideId : (guideId ?? undefined);
     if (typeof plotline === "string") {
-      const ids = new Set([...(snapshot.plotlines ?? []).map((p) => p.id), PLOTLINE_OTHER_ID]);
+      const source = effectiveGuide
+        ? (snapshot.guides ?? []).find((g) => g.id === effectiveGuide)?.plotlines ?? []
+        : (snapshot.plotlines ?? []);
+      const ids = new Set([...source.map((p) => p.id), PLOTLINE_OTHER_ID]);
       if (!ids.has(plotline)) return reply.code(400).send({ error: `unknown plotline ${plotline}` });
     }
 
     try {
       await ctx.reviews.mutate(id, (draft) => {
         const next = { ...(draft.diffFilter ?? {}) };
+        if (guideId !== undefined && (guideId ?? undefined) !== next.guideId) {
+          if (guideId === null) delete next.guideId;
+          else next.guideId = guideId;
+          if (plotline === undefined) delete next.plotline;
+        }
         if (plotline === null) delete next.plotline;
         else if (plotline !== undefined) next.plotline = plotline;
         if (score === null) delete next.score;

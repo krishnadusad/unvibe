@@ -29,7 +29,7 @@ import type {
   TokenUsage,
 } from "@unvibe/shared";
 import { canonicalizeTarget, collectTargets, DEFAULT_GUIDE_TITLE, isDocumentReview, JOB_PRIORITY, normalizePlotlines, parseCards, parseCardsPartial, parseHunkReply, parseId, PLOTLINE_ASSIGN_CAP, resolveHunkScore, splitReply } from "@unvibe/shared";
-import { postureFor } from "@unvibe/shared";
+import { customGuideCardId, isCustomGuidePage, postureFor } from "@unvibe/shared";
 import type { HunkReplyResult } from "@unvibe/shared";
 import { attachPartialUsage, DegradedConnError, DegradedTurnError, partialUsageOf, RetryableError, type PartialUsageCarrier } from "../jobs/errors.js";
 import type { JobQueue } from "../jobs/index.js";
@@ -50,6 +50,7 @@ import type { CommandRunner } from "../exec/index.js";
 import { validateReply } from "../validate/index.js";
 import { lookupForSnapshot, resolveCodeFileExistence } from "./lookup.js";
 import { createSuggestedCommentInDraft } from "../comments/threads.js";
+import { applyCustomGuideReply, guideClarifyQuestion, renderGuideClock, renderGuideCommits, renderGuideRequest, writeGuidePage } from "./customGuide.js";
 import { buildDocumentBaseText } from "../document/map.js";
 import { resolveDocumentCodeExistence } from "../document/resolve.js";
 import { criticApplyAll, isDefaultReaderCardId, readerApply, readerCardId, splitFinalizedBlocks } from "./apply.js";
@@ -567,7 +568,9 @@ export class Pipeline {
               first.data,
               first.cards.flatMap((c) => c.blocks).length,
             );
-            if (firstDisp.kind === "fail-conn" || firstDisp.kind === "fail-empty") {
+            if (firstDisp.kind === "fail-empty" && o.acceptEmpty?.(first.data)) {
+              // An empty reply the caller accepts (a clarifying question).
+            } else if (firstDisp.kind === "fail-conn" || firstDisp.kind === "fail-empty") {
               // The turn did stream (and spend) before failing on facts:
               // keep its usage like any other attempt (#151).
               ctx.reportUsage(usage);
@@ -581,7 +584,8 @@ export class Pipeline {
             let finalData = first.data;
             let finalValidation = first.validation;
             let repaired = false;
-            if (first.validation.needsRepairTurn && degradedReason === undefined) {
+            const acceptedEmpty = firstDisp.kind === "fail-empty";
+            if (first.validation.needsRepairTurn && degradedReason === undefined && !acceptedEmpty) {
               repaired = true;
               const anchorProblem =
                 first.validation.anchor && !first.validation.anchor.ok
@@ -652,6 +656,7 @@ export class Pipeline {
               viaFork: forked.viaFork,
               repaired,
             });
+            if (o.skipIngest) return;
             await this.finishBookkeeping(o.reviewId, () =>
               this.ingestTurn(o.reviewId, {
                 sessionId: forked.session.id,
@@ -928,6 +933,111 @@ export class Pipeline {
       .filter(([, v]) => v !== "done")
       .map(([k]) => k);
     return { jobIds, pendingStages };
+  }
+
+  /**
+   * Generate (or regenerate) a custom guide from its request turns. Forks
+   * the review's base, streams sections into the guide's root page, then
+   * writes the scope, plotlines and suggested comments — or, when the
+   * agent asks a clarifying question, parks the guide in "needs-input".
+   * Contributions stay out of the shared context (`skipIngest`). Resolves
+   * with the job once it is enqueued; the result lands on the snapshot.
+   */
+  async runCustomGuide(reviewId: string, guideId: string): Promise<Job> {
+    const snapshot = this.opts.reviews.getSnapshot(reviewId);
+    const guide = snapshot?.guides?.find((g) => g.id === guideId);
+    if (!snapshot || !guide) throw new Error(`unknown custom guide ${guideId}`);
+    const fail = async (err: unknown): Promise<void> => {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.opts.reviews.mutate(reviewId, (draft) => {
+        const g = draft.guides?.find((x) => x.id === guideId);
+        if (!g) return;
+        g.status = "failed";
+        g.error = message.slice(0, 500);
+        delete g.jobId;
+      });
+    };
+    let resolveJob!: (job: Job) => void;
+    let rejectJob!: (err: Error) => void;
+    const jobReady = new Promise<Job>((res, rej) => {
+      resolveJob = res;
+      rejectJob = rej;
+    });
+    const run = this.runInFork({
+      reviewId,
+      kind: "custom-guide",
+      template: "custom_guide",
+      variables: {
+        request: renderGuideRequest(guide),
+        now: renderGuideClock(),
+        commits: renderGuideCommits(snapshot.commits ?? []),
+      },
+      priority: JOB_PRIORITY.userRequested,
+      cardId: customGuideCardId(guideId, 1),
+      skipIngest: true,
+      acceptEmpty: (data) => guideClarifyQuestion(data, 0) !== null,
+      replay: { kind: "custom-guide", key: guideId },
+      onJob: (job) => {
+        resolveJob(job);
+        void this.opts.reviews.mutate(reviewId, (draft) => {
+          const g = draft.guides?.find((x) => x.id === guideId);
+          if (!g) return;
+          g.status = "working";
+          g.jobId = job.id;
+          delete g.error;
+          delete g.question;
+        });
+      },
+      onPartial: async (cards) => {
+        await this.opts.reviews.mutate(reviewId, (draft) => {
+          const g = draft.guides?.find((x) => x.id === guideId);
+          if (!g || g.status !== "working") return;
+          writeGuidePage(draft, g, cards);
+        });
+      },
+    });
+    run
+      .then(async (result) => {
+        const question = guideClarifyQuestion(result.data, result.cards.length);
+        if (question) {
+          await this.opts.reviews.mutate(reviewId, (draft) => {
+            const g = draft.guides?.find((x) => x.id === guideId);
+            if (!g) return;
+            g.status = "needs-input";
+            g.question = question;
+            g.turns.push({ who: "agent", text: question, at: Date.now() });
+            delete g.jobId;
+            writeGuidePage(draft, g, []);
+          });
+          return;
+        }
+        const cards = result.cards.map((c) => ({
+          title: c.title,
+          blocks: this.withValidation(reviewId, c.blocks, result.validation),
+        }));
+        const before = this.opts.reviews.getSnapshot(reviewId);
+        if (!before) return;
+        const aliases = aliasesForReview(before, this.opts.fixturesDir);
+        await this.opts.reviews.mutate(reviewId, (draft) => {
+          applyCustomGuideReply(draft, before, guideId, {
+            cards,
+            data: result.data,
+            canonicalFileKey: (fk) => aliases[fk] ?? fk,
+            lineText: (fileKey, line) => {
+              for (const f of draft.files) {
+                if (f.fileKey !== fileKey) continue;
+                for (const h of f.hunks) for (const row of h.lines) if (row.newLine === line) return row.text;
+              }
+              return "";
+            },
+          });
+        });
+      })
+      .catch(async (err: unknown) => {
+        rejectJob(err instanceof Error ? err : new Error(String(err)));
+        await fail(err);
+      });
+    return jobReady;
   }
 
   async ensureConceptPage(reviewId: string, slug: string): Promise<Job> {
@@ -2716,6 +2826,8 @@ export class Pipeline {
     if (!snapshot) return false;
     const targets = new Set<string>();
     for (const page of snapshot.pages) {
+      // Only the main guide's citations decide hunk visibility and ladders.
+      if (isCustomGuidePage(page)) continue;
       for (const card of page.cards) {
         for (const b of card.blocks) {
           for (const c of citationsOf(b)) targets.add(c);
