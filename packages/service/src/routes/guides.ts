@@ -28,6 +28,7 @@ import type { ServiceContext } from "./context.js";
 import type { RouteDeps } from "./deps.js";
 import { ingestRefusal } from "../reviews/index.js";
 import { removeGuidePages } from "../pipeline/customGuide.js";
+import { fetchGuideComments, type GuideComment } from "../pipeline/guideComments.js";
 
 function readText(body: unknown, field: "prompt" | "answer"): string | { error: string } {
   const value = (body as Record<string, unknown> | null)?.[field];
@@ -40,10 +41,30 @@ function readText(body: unknown, field: "prompt" | "answer"): string | { error: 
 
 export async function registerGuides(app: FastifyInstance, ctx: ServiceContext, deps: RouteDeps = {}): Promise<void> {
   /** Start a run and answer with the guide as it now stands. */
+  /**
+   * The PR's discussion, read fresh (read-only GETs) so the guide sees
+   * comments posted since the review opened. Best effort: undefined
+   * falls back to the stored comments.
+   */
+  const freshComments = async (reviewId: string): Promise<GuideComment[] | undefined> => {
+    const snapshot = ctx.reviews.getSnapshot(reviewId);
+    const pr = snapshot?.review.prNumber;
+    const repo = snapshot ? ctx.repos.get(snapshot.review.repoId) : undefined;
+    // The bundled demo has no GitHub behind it, so no discussion (and no gh call).
+    if (snapshot?.review.repoId === "demo") return [];
+    if (pr === undefined || !repo || !repo.owner || !repo.name) return undefined;
+    try {
+      return await fetchGuideComments(ctx.runner, repo.localPath, repo.owner, repo.name, pr);
+    } catch {
+      return undefined;
+    }
+  };
+
   const start = async (reply: FastifyReply, reviewId: string, guideId: string): Promise<unknown> => {
     if (!deps.pipeline) return reply.code(503).send({ error: "the agent pipeline is not running" });
     try {
-      const job = await deps.pipeline.runCustomGuide(reviewId, guideId);
+      const githubComments = await freshComments(reviewId);
+      const job = await deps.pipeline.runCustomGuide(reviewId, guideId, githubComments ? { githubComments } : {});
       const guide = ctx.reviews.getSnapshot(reviewId)?.guides?.find((g) => g.id === guideId);
       if (!guide) return reply.code(404).send({ error: "unknown custom guide" });
       const body: CustomGuideResponse = { guide, jobId: job.id };

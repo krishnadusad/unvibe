@@ -156,6 +156,10 @@ describe("custom guides", () => {
       const sent = agents.prompts.find((p) => p.text.includes("# Custom guide"))!.text;
       expect(sent).toContain("Security review of input parsing");
       expect(sent).toContain("## Reader's clock");
+      // The PR discussion section is there; the demo has no GitHub behind
+      // it, so it reads as empty (and no gh call is made).
+      expect(sent).toContain("## The PR's discussion on GitHub");
+      expect(sent).toContain("(nobody has commented on the PR yet)");
     } finally {
       await app.close();
     }

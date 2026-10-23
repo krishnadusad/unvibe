@@ -15,11 +15,13 @@ import {
   resolveCustomGuideScope,
   type Block,
   type CustomGuide,
+  type ExistingReviewComment,
   type ReplyData,
   type ReviewCommit,
   type ReviewSnapshot,
 } from "@unvibe/shared";
 import { createSuggestedCommentInDraft } from "../comments/threads.js";
+import type { GuideComment } from "./guideComments.js";
 
 /** Most suggested comments one guide reply may add. */
 export const CUSTOM_GUIDE_MAX_COMMENTS = 5;
@@ -238,4 +240,94 @@ export function renderSuggestionHunks(snap: ReviewSnapshot): string {
     .slice(0, SUGGESTION_HUNK_LIMIT)
     .map((r) => `- [${r.score}] ${r.path}: ${r.summary}`)
     .join("\n");
+}
+
+// --- existing GitHub comments ------------------------------------------------
+
+/** Most comment threads, and characters per comment, sent to a guide. */
+const GUIDE_COMMENT_THREADS_MAX = 60;
+const GUIDE_COMMENT_CHARS_MAX = 2000;
+
+/** Logins GitHub gives apps and bots. */
+export function isBotLogin(login: string | undefined): boolean {
+  return login !== undefined && /\[bot\]$|^(dependabot|renovate|github-actions|codecov)\b/i.test(login);
+}
+
+/** Stored inline comments (the menu's ingest-time fetch) as guide comments. */
+export function guideCommentsFromStored(stored: readonly ExistingReviewComment[] | undefined): GuideComment[] | undefined {
+  if (stored === undefined) return undefined;
+  return stored.map((c) => ({
+    id: c.id,
+    kind: "inline" as const,
+    body: c.body,
+    ...(c.path !== undefined ? { path: c.path } : {}),
+    ...(c.line !== undefined ? { line: c.line } : {}),
+    ...(c.author !== undefined ? { author: c.author } : {}),
+    ...(c.createdAt !== undefined ? { createdAt: c.createdAt } : {}),
+    ...(c.replyTo !== undefined ? { replyTo: c.replyTo } : {}),
+  }));
+}
+
+const REVIEW_STATE: Record<string, string> = {
+  APPROVED: "approved",
+  CHANGES_REQUESTED: "requested changes",
+  COMMENTED: "commented",
+  DISMISSED: "review dismissed",
+};
+
+/**
+ * The PR's GitHub discussion as threads, oldest first: inline threads by
+ * file and line (root, then replies), conversation comments and review
+ * verdicts under "General". Each comment has author, date and full text;
+ * bots are marked so a "human comments" request can leave them out.
+ */
+export function renderGuideGithubComments(comments: readonly GuideComment[] | undefined): string {
+  if (comments === undefined) return "(not available: GitHub was unreachable, or this review is not a PR)";
+  if (comments.length === 0) return "(nobody has commented on the PR yet)";
+  const inline = comments.filter((c) => c.kind === "inline");
+  const byId = new Map(inline.map((c) => [c.id, c]));
+  const rootOf = (c: GuideComment): number => {
+    let cur = c;
+    for (let guard = 0; cur.replyTo !== undefined && byId.has(cur.replyTo) && guard < 50; guard++) cur = byId.get(cur.replyTo)!;
+    return cur.id;
+  };
+  const threads = new Map<string, GuideComment[]>();
+  for (const c of comments) {
+    const key = c.kind === "inline" ? `i${rootOf(c)}` : `g${c.id}`;
+    threads.set(key, [...(threads.get(key) ?? []), c]);
+  }
+  const time = (c: GuideComment): string => c.createdAt ?? "";
+  const ordered = [...threads.values()]
+    .map((t) => [...t].sort((a, b) => time(a).localeCompare(time(b))))
+    .sort((a, b) => time(a[0]).localeCompare(time(b[0])));
+  const out: string[] = [];
+  for (const thread of ordered.slice(0, GUIDE_COMMENT_THREADS_MAX)) {
+    const root = thread[0];
+    const where =
+      root.kind !== "inline"
+        ? "General"
+        : root.path !== undefined
+          ? root.line !== undefined
+            ? `${root.path}:${root.line}`
+            : root.path
+          : "General";
+    out.push(`### ${where}`);
+    for (const c of thread) {
+      const who = c.author ?? "unknown";
+      const what =
+        c.kind === "review"
+          ? ` · review: ${REVIEW_STATE[c.state ?? ""] ?? (c.state ?? "review").toLowerCase()}`
+          : c !== root
+            ? " · reply"
+            : "";
+      const body = c.body.trim();
+      const text = body.length > GUIDE_COMMENT_CHARS_MAX ? `${body.slice(0, GUIDE_COMMENT_CHARS_MAX)}…` : body;
+      out.push(`- ${who}${isBotLogin(c.author) ? " (bot)" : ""}${c.createdAt ? ` · ${c.createdAt}` : ""}${what}:`);
+      out.push(...(text === "" ? ["  (no text)"] : text.split("\n").map((l) => `  > ${l}`)));
+    }
+    out.push("");
+  }
+  const rest = ordered.length - Math.min(ordered.length, GUIDE_COMMENT_THREADS_MAX);
+  if (rest > 0) out.push(`(${rest} older threads not shown)`);
+  return out.join("\n").trimEnd();
 }

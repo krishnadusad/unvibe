@@ -50,7 +50,8 @@ import type { CommandRunner } from "../exec/index.js";
 import { validateReply } from "../validate/index.js";
 import { lookupForSnapshot, resolveCodeFileExistence } from "./lookup.js";
 import { createSuggestedCommentInDraft } from "../comments/threads.js";
-import { applyCustomGuideReply, guideClarifyQuestion, renderGuideClock, renderGuideCommits, renderGuideRequest, renderSuggestionChange, renderSuggestionFiles, renderSuggestionHunks, renderSuggestionPlotlines, writeGuidePage } from "./customGuide.js";
+import type { GuideComment } from "./guideComments.js";
+import { applyCustomGuideReply, guideClarifyQuestion, guideCommentsFromStored, renderGuideClock, renderGuideGithubComments, renderGuideCommits, renderGuideRequest, renderSuggestionChange, renderSuggestionFiles, renderSuggestionHunks, renderSuggestionPlotlines, writeGuidePage } from "./customGuide.js";
 import { buildDocumentBaseText } from "../document/map.js";
 import { resolveDocumentCodeExistence } from "../document/resolve.js";
 import { criticApplyAll, isDefaultReaderCardId, readerApply, readerCardId, splitFinalizedBlocks } from "./apply.js";
@@ -943,7 +944,11 @@ export class Pipeline {
    * Contributions stay out of the shared context (`skipIngest`). Resolves
    * with the job once it is enqueued; the result lands on the snapshot.
    */
-  async runCustomGuide(reviewId: string, guideId: string): Promise<Job> {
+  async runCustomGuide(
+    reviewId: string,
+    guideId: string,
+    opts: { githubComments?: GuideComment[] } = {},
+  ): Promise<Job> {
     const snapshot = this.opts.reviews.getSnapshot(reviewId);
     const guide = snapshot?.guides?.find((g) => g.id === guideId);
     if (!snapshot || !guide) throw new Error(`unknown custom guide ${guideId}`);
@@ -971,6 +976,13 @@ export class Pipeline {
         request: renderGuideRequest(guide),
         now: renderGuideClock(),
         commits: renderGuideCommits(snapshot.commits ?? []),
+        // Fresh from GitHub when the route could fetch it, else what the
+        // comments menu loaded; none at all on branch reviews.
+        github_comments: renderGuideGithubComments(
+          snapshot.review.prNumber === undefined
+            ? undefined
+            : (opts.githubComments ?? guideCommentsFromStored(snapshot.existingComments)),
+        ),
       },
       priority: JOB_PRIORITY.userRequested,
       cardId: customGuideCardId(guideId, 1),
