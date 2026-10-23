@@ -18,7 +18,7 @@ import { performFollowUp } from "../guide/actions.js";
 import { PaneLoading } from "../ui/index.js";
 import { useDiffExpansionBindings } from "../guide/expansions/DiffExpansions.js";
 import { showGuidePane } from "../shell/panes.js";
-import { useReview } from "../state/store.js";
+import { useReview, useVisibleAnnotations } from "../state/store.js";
 import { DescriptionView } from "./description/DescriptionView.js";
 import { descriptionPaneName } from "./description/paneName.js";
 import { DiffView } from "./diff/DiffView.js";
@@ -49,7 +49,7 @@ export function SourcePane({ reviewId, tab, onTab }: Props) {
   const onFollowUp = (cardId: string, blockId: string, index: number): void => {
     performFollowUp(reviewId, cardId, blockId, index);
   };
-  const annotations = useReview((s) => s.snapshot?.annotations);
+  const annotations = useVisibleAnnotations();
   const diffComments = useDiffCommentBindings(reviewId);
   const diffExpansions = useDiffExpansionBindings(reviewId, lookupPage, onOpenPage, onFollowUp);
   // A comment and a conversation card share a line's slot row: merge

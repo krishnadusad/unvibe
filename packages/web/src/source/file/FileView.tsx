@@ -16,7 +16,7 @@ import { ThreadView } from "../../comments/ThreadView.js";
 import { NEW_THREAD_EVENT, type NewThreadRequest } from "../../floating/SelectionToolbar.js";
 import { toast } from "../../floating/Toast.js";
 import { ExpansionCard } from "../../guide/expansions/ExpansionCard.js";
-import { useReview } from "../../state/store.js";
+import { useVisibleAnnotations } from "../../state/store.js";
 import "./file.css";
 
 const CHUNK = 200;
@@ -42,7 +42,7 @@ interface Pending {
 }
 
 export function FileView({ reviewId, path, commit, start, end, lookupPage, onOpenPage, onFollowUp }: Props) {
-  const annotations = useReview((s) => s.snapshot?.annotations);
+  const annotations = useVisibleAnnotations();
   const [lines, setLines] = useState<string[] | null>(null);
   const [totalLines, setTotalLines] = useState(0);
   const [error, setError] = useState<string | null>(null);

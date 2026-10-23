@@ -316,7 +316,12 @@ export async function fetchPrInfo(
   };
 }
 
-/** Commits in merge-base..head order (oldest first), null-separated. */
+/**
+ * Commits in merge-base..head order (oldest first), null-separated:
+ * sha, author, author date, committer date, subject, body. Dates are
+ * strict ISO 8601 with the author's offset, so "today's commits" can be
+ * judged in the reader's own timezone.
+ */
 export async function readCommitMessages(
   runner: CommandRunner,
   repoPath: string,
@@ -326,7 +331,7 @@ export async function readCommitMessages(
   const res = await runGit(runner, [
     "log",
     "--reverse",
-    "--format=%H%x00%s%x00%b%x1e",
+    "--format=%H%x00%an%x00%aI%x00%cI%x00%s%x00%b%x1e",
     `${mergeBase}..${head}`,
   ], repoPath);
   if (!res.ok) return [];
@@ -334,9 +339,16 @@ export async function readCommitMessages(
   for (const record of res.stdout.split("\x1e")) {
     const trimmed = record.replace(/^\n+/, "");
     if (!trimmed.trim()) continue;
-    const [sha = "", subject = "", body = ""] = trimmed.split("\0");
+    const [sha = "", author = "", authorDate = "", committerDate = "", subject = "", body = ""] = trimmed.split("\0");
     if (!sha) continue;
-    commits.push({ sha: sha.trim(), subject: subject.trim(), body: body.trim() });
+    commits.push({
+      sha: sha.trim(),
+      subject: subject.trim(),
+      body: body.trim(),
+      author: author.trim(),
+      authorDate: authorDate.trim(),
+      committerDate: committerDate.trim(),
+    });
   }
   return commits;
 }

@@ -52,6 +52,18 @@ export interface RunInForkOptions {
   /** Called with newly finished cards as they stream in. */
   onPartial?: (cards: ParsedCard[]) => void | Promise<void>;
   /**
+   * A reply with no cards is normally a failed turn. Return true for
+   * replies whose trailing JSON alone is a valid answer (a custom guide's
+   * clarifying question).
+   */
+  acceptEmpty?: (data: ReplyData | null) => boolean;
+  /**
+   * Skip feeding the turn's contributions into the review's shared
+   * context. Custom guides set this: their notes and questions belong to
+   * the guide, not to the main guide's later turns.
+   */
+  skipIngest?: boolean;
+  /**
    * Issue #50: strings an echo of which must not open the reply body
    * (the selection, the question, the stored card title). Each parsed
    * card additionally matches its own title. Absent = no stripping;

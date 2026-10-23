@@ -37,6 +37,7 @@ import {
   groupHunks,
   hiddenDetail,
   hiddenRunLabel,
+  hunkInScope,
   pairSplitRows,
   tailPathParts,
   type SplitRow,
@@ -139,6 +140,8 @@ interface SectionProps {
    * by the caller.
    */
   plotFilter?: DiffFilter;
+  /** Custom guides: `h:` ids of the open guide's hunks; others render nothing. */
+  scope?: ReadonlySet<string>;
   /** Issue #169: plotline id → display name, for the hunk header tag. */
   plotlineNames?: ReadonlyMap<string, string>;
   /** Owner direction (#169): the header dot/chip are the filter selectors. */
@@ -804,6 +807,7 @@ export function FileSection(props: SectionProps): ReactNode {
     // Issue #169: hunks the score/plotline filter rejects render nothing
     // (not even a hidden row); the caller drops files left with none.
     const plotVisible = (hunk: Hunk): boolean => {
+      if (!hunkInScope(file.fileKey, hunk, props.scope)) return false;
       const s = props.states.get(hunk.contentHash);
       return hunkMatchesFilter(s?.score, s?.plotline, props.plotFilter);
     };

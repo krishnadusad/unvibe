@@ -27,7 +27,7 @@ import { ReplyBox } from "../../comments/ReplyBox.js";
 import { Icon } from "../../components/Icon.js";
 import { toast } from "../../floating/Toast.js";
 import { api, friendlyError } from "../../api/client.js";
-import { useReview } from "../../state/store.js";
+import { useReview, useVisibleAnnotations } from "../../state/store.js";
 import { performAction, performInsertAction } from "../actions.js";
 import { blockThreads } from "../annotations.js";
 import { BlockView } from "../BlockView.js";
@@ -145,7 +145,7 @@ function AnswerView({
   ancestorIds: string[];
 }) {
   const snapshot = useReview((s) => s.snapshot);
-  const annotations = snapshot?.annotations ?? [];
+  const annotations = useVisibleAnnotations() ?? [];
   const inflight = useReview((s) => s.inflight);
   const jobs = snapshot?.jobs ?? [];
 

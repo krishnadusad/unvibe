@@ -521,6 +521,9 @@ export async function refreshReview(
     draft.version = { ...version };
     draft.review.versions = [...draft.review.versions, { ...version }];
     draft.review.currentVersion = version.n;
+    // Custom guides are not revised by the update pass: they show
+    // "generated for an earlier version" with Regenerate instead.
+    for (const g of draft.guides ?? []) if (g.version < version.n) g.stale = true;
     draft.versionStatus = { ...versionStatus };
 
     // Hunk state (PRD §8 table).

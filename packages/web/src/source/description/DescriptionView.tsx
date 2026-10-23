@@ -41,7 +41,7 @@ import { Button, Card } from "../../ui/index.js";
 import { requestGuideBlock, performFollowUp } from "../../guide/actions.js";
 import { DescriptionExpansions } from "../../guide/expansions/DescriptionExpansions.js";
 import { inflightForAnchor, inflightLabel } from "../../guide/inflight.js";
-import { useReview } from "../../state/store.js";
+import { useReview, useVisibleAnnotations } from "../../state/store.js";
 import { hostLabel, recordUnplacedAnchors } from "../../guide/unplacedAnchors.js";
 import { cleanEditedHtml, DescriptionEditor as DefaultEditor } from "./DescriptionEditor.js";
 import { canEditDescription } from "./canEdit.js";
@@ -81,7 +81,7 @@ function sameSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
 
 export function DescriptionView({ reviewId, editor }: Props) {
   const description = useReview((s) => s.snapshot?.description);
-  const annotations = useReview((s) => s.snapshot?.annotations);
+  const annotations = useVisibleAnnotations();
   const readOnlyVersion = useIsReadOnlyVersion();
   const viewer = useViewer();
   const [editing, setEditing] = useState(false);

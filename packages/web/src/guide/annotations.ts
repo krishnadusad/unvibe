@@ -10,7 +10,7 @@
  */
 import { useMemo } from "react";
 import type { Annotation } from "@unvibe/shared";
-import { useReview } from "../state/store.js";
+import { useVisibleAnnotations } from "../state/store.js";
 import { anchorMatchesBlock } from "./guideUtils.js";
 
 export type OpenThreadHandler = (threadId: string, blockId: string, opts?: { scroll?: boolean }) => void;
@@ -68,7 +68,7 @@ export function blockExpansions(
 }
 
 export function useBlockThreads(cardId: string, blockId: string): Annotation[] {
-  const annotations = useReview((s) => s.snapshot?.annotations);
+  const annotations = useVisibleAnnotations();
   return useMemo(
     () => (annotations ? blockThreads(annotations, cardId, blockId) : []),
     [annotations, cardId, blockId],
@@ -76,7 +76,7 @@ export function useBlockThreads(cardId: string, blockId: string): Annotation[] {
 }
 
 export function useBlockExpansions(cardId: string, blockId: string): Annotation[] {
-  const annotations = useReview((s) => s.snapshot?.annotations);
+  const annotations = useVisibleAnnotations();
   return useMemo(
     () => (annotations ? blockExpansions(annotations, cardId, blockId) : []),
     [annotations, cardId, blockId],

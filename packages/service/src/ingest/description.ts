@@ -210,6 +210,10 @@ export interface CommitMessage {
   sha: string;
   subject: string;
   body: string;
+  /** Author name, and author / committer dates (ISO 8601 with offset). */
+  author: string;
+  authorDate: string;
+  committerDate: string;
 }
 
 /** Render branch commit messages (read-only description tab, PRD §4.11). */

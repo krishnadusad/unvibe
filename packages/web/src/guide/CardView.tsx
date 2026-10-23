@@ -23,7 +23,7 @@ import { GuideBlockThreads } from "../comments/GuideThreads.js";
 import { Icon } from "../components/Icon.js";
 import { toast } from "../floating/Toast.js";
 import { friendlyError } from "../api/client.js";
-import { useReview } from "../state/store.js";
+import { useReview, useVisibleAnnotations } from "../state/store.js";
 import { performAction, performInsertAction, performUpdate } from "./actions.js";
 import { blockThreads } from "./annotations.js";
 import { BlockView } from "./BlockView.js";
@@ -136,7 +136,7 @@ function promotedFillFor(
 export function CardView({ reviewId, card, lookupPage, onOpenPage, onFollowUp }: Props) {
   const snapshot = useReview((s) => s.snapshot);
   const jobs = snapshot?.jobs ?? [];
-  const annotations = snapshot?.annotations ?? [];
+  const annotations = useVisibleAnnotations() ?? [];
   const inflight = useReview((s) => s.inflight);
   const contributions = snapshot?.contributions ?? [];
   const busy = busyForCard(inflight, jobs, card.id);

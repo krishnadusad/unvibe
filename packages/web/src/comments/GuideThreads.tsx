@@ -27,7 +27,7 @@ import { toast } from "../floating/Toast.js";
 import { anchorMatchesBlock } from "../guide/guideUtils.js";
 import { onOpenBlockThread } from "../guide/annotations.js";
 import { inflightForBlock, inflightLabel } from "../guide/inflight.js";
-import { useReview } from "../state/store.js";
+import { useReview, useVisibleAnnotations } from "../state/store.js";
 import { anchorHostExists, anchorScope, clearMarks, highlightAnchorInRoot, probeAnchorInRoot, retryUntilSettled, spotFromAnchor, withPreservedSelection } from "./anchor.js";
 import { hostLabel, recordUnplacedAnchors } from "../guide/unplacedAnchors.js";
 import { NEW_THREAD_EVENT, type NewThreadRequest } from "../floating/SelectionToolbar.js";
@@ -43,7 +43,7 @@ function makeMark(commentId: string): HTMLElement {
 }
 
 export function GuideThreadHooks() {
-  const annotations = useReview((s) => s.snapshot?.annotations);
+  const annotations = useVisibleAnnotations();
   const pages = useReview((s) => s.snapshot?.pages);
   // The guide page remounts with clean DOM on navigation while this
   // component stays mounted: re-run the pass on the route too, or marks
@@ -273,7 +273,7 @@ interface BlockProps {
 }
 
 export function GuideBlockThreads({ reviewId, cardId, blockId }: BlockProps) {
-  const annotations = useReview((s) => s.snapshot?.annotations);
+  const annotations = useVisibleAnnotations();
   const inflight = useReview((s) => s.inflight);
   const readOnly = useIsReadOnlyVersion();
   const [pending, setPending] = useState<NewThreadRequest | null>(null);
