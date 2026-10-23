@@ -19,7 +19,7 @@ import { WorkingPlaceholder } from "../components/WorkingPlaceholder.js";
 import { toast } from "../floating/Toast.js";
 import { diffAnchorForExplainKey, inflightLabel } from "../guide/inflight.js";
 import { slotKey, type LineSlots } from "../source/diff/lineSlots.js";
-import { useReview } from "../state/store.js";
+import { useReview, useVisibleAnnotations } from "../state/store.js";
 import { NEW_THREAD_EVENT, type NewThreadRequest } from "../floating/SelectionToolbar.js";
 import { hunkCommentAnchor } from "../source/diff/hunkAnchor.js";
 import { NewThreadComposer } from "./NewThreadComposer.js";
@@ -58,7 +58,7 @@ export function useDiffCommentBindings(reviewId: string): {
   commentedLines: ReadonlySet<string>;
   onLineClick: (fileKey: string, line: number) => void;
 } {
-  const annotations = useReview((s) => s.snapshot?.annotations);
+  const annotations = useVisibleAnnotations();
   const inflight = useReview((s) => s.inflight);
   const readOnly = useIsReadOnlyVersion();
   const [pending, setPending] = useState<Pending | null>(null);

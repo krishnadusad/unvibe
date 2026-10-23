@@ -154,6 +154,11 @@ export interface FileFilter {
    */
   plot?: DiffFilter;
   hunkStateOf?: (contentHash: string) => { score?: HunkScoreLevel; plotline?: string } | undefined;
+  /**
+   * Custom guides: canonical `h:` ids of the open guide's hunks. When
+   * set, only those hunks show and files with none of them drop out.
+   */
+  scope?: ReadonlySet<string>;
 }
 
 /** Prototype `visibleFiles`: category chips + name filter + hide-reviewed. */
@@ -164,8 +169,43 @@ export function filterFiles(files: ReviewFile[], filter: FileFilter): ReviewFile
       filter.cats.has(f.category) &&
       f.path.toLowerCase().includes(q) &&
       !(filter.hideReviewed && filter.reviewedCount(f) === f.hunks.length) &&
-      (!filter.plot || f.hunks.some((h) => hunkPlotVisible(h, filter))),
+      (!filter.scope || f.hunks.some((h) => hunkInScope(f.fileKey, h, filter.scope))) &&
+      (!filter.plot ||
+        f.hunks.some((h) => hunkInScope(f.fileKey, h, filter.scope) && hunkPlotVisible(h, filter))),
   );
+}
+
+/** True when a hunk is in the open custom guide's scope (no scope = all). */
+export function hunkInScope(fileKey: string, hunk: Pick<Hunk, "contentHash">, scope: ReadonlySet<string> | undefined): boolean {
+  return !scope || scope.has(`h:${fileKey}:${hunk.contentHash}`);
+}
+
+/**
+ * Hunk states as a custom guide reads them: the guide's own plotline
+ * assignment replaces the main guide's (`plotline` absent = "other");
+ * everything else (fold, reviewed, score) is shared. Hunks with no state
+ * yet get a blank one when the guide assigns them a plotline.
+ */
+export function guideHunkStates<S extends { plotline?: string }>(
+  files: readonly ReviewFile[],
+  states: ReadonlyMap<string, S>,
+  assignment: Readonly<Record<string, string>>,
+  blank: (contentHash: string) => S,
+): Map<string, S> {
+  const out = new Map<string, S>();
+  for (const [hash, st] of states) {
+    const rest = { ...st };
+    delete rest.plotline;
+    out.set(hash, rest);
+  }
+  for (const f of files) {
+    for (const h of f.hunks) {
+      const plotline = assignment[`h:${f.fileKey}:${h.contentHash}`];
+      if (plotline === undefined) continue;
+      out.set(h.contentHash, { ...(out.get(h.contentHash) ?? blank(h.contentHash)), plotline });
+    }
+  }
+  return out;
 }
 
 /** True when a hunk passes the score/plotline filter (absent = all pass). */

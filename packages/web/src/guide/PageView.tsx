@@ -6,9 +6,9 @@
  * before pending cards. Finding pages get the rust-accent `.finding`
  * class.
  */
-import { Fragment, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { Card, Page, Plotline } from "@unvibe/shared";
-import { DEFAULT_GUIDE_TITLE, isDefaultGuideTitle, PLOTLINE_OTHER_ID } from "@unvibe/shared";
+import { Fragment, useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import type { Card, CustomGuide, Page, Plotline } from "@unvibe/shared";
+import { DEFAULT_GUIDE_TITLE, isDefaultGuideTitle } from "@unvibe/shared";
 import { api } from "../api/client.js";
 import { ErrorBoundary, InlineFallback } from "../components/ErrorBoundary.js";
 import { toast } from "../floating/Toast.js";
@@ -17,6 +17,7 @@ import { isLiveJobState, useReview } from "../state/store.js";
 import { revealSource } from "../source/reveal.js";
 import { performFollowUp } from "./actions.js";
 import { CardView } from "./CardView.js";
+import { guidePlotlineOf, hunkCanonicalId, plotlineRows } from "./customGuideRoutes.js";
 import { contentsModel } from "./guideUtils.js";
 import { Badge, Card as UiCard, ListRow } from "../ui/index.js";
 import { inflightLabel } from "./inflight.js";
@@ -28,6 +29,18 @@ interface Props {
   lookupPage: (pageId: string) => Page | undefined;
   onOpenPage: (pageId: string | null) => void;
   onJumpToCard: (cardId: string) => void;
+  /**
+   * Custom guide this page belongs to (its root or a child page): the
+   * trail stops at the guide's root, the root shows the guide's own
+   * plotlines, and `intro` / `outro` frame the cards.
+   */
+  guide?: CustomGuide;
+  /** Above the trail (the guides switcher). */
+  top?: ReactNode;
+  /** Between the title and Contents (a custom guide's request and state). */
+  intro?: ReactNode;
+  /** After the cards (a custom guide's suggested comments). */
+  outro?: ReactNode;
 }
 
 /** Finding recheck status line (PRD §8): set by refresh / the update pass. */
@@ -57,51 +70,42 @@ function displayTitle(title: string): string {
 }
 
 /**
- * Issue #169: the reader's plotlines on the guide root — a small list
- * between Contents and the cards. Each row jumps to its first hunk in
- * the diff; hunks no plotline claimed read as "Other".
+ * Issue #169: the reader's plotlines — a small list between Contents and
+ * the cards (the main guide's root, and each custom guide's root with
+ * that guide's own plotlines). Each row jumps to its first hunk in the
+ * diff; in-scope hunks no plotline claimed read as "Other".
  */
-function Plotlines({ reviewId }: { reviewId: string }): ReactNode {
-  const snapshot = useReview((s) => s.snapshot);
-  const plotlines: Plotline[] = snapshot?.plotlines ?? [];
+export function Plotlines({
+  reviewId,
+  plotlines,
+  plotlineOf,
+  inScope,
+  guideId,
+}: {
+  reviewId: string;
+  plotlines: Plotline[];
+  /** A hunk's plotline id (absent = "other"). */
+  plotlineOf: (fileKey: string, contentHash: string) => string | undefined;
+  /** Hunks counted (a custom guide counts only its own); default all. */
+  inScope?: (fileKey: string, contentHash: string) => boolean;
+  /** Custom guide the plotlines belong to; null for the main guide. */
+  guideId: string | null;
+}): ReactNode {
+  const files = useReview((s) => s.snapshot?.files);
+  const diffFilter = useReview((s) => s.snapshot?.diffFilter);
   if (plotlines.length === 0) return null;
-  const files = snapshot?.files ?? [];
-  const states = new Map((snapshot?.hunkStates ?? []).map((s) => [s.contentHash, s]));
-  const firstRefOf = (plotId: string | undefined): string | null => {
-    for (const f of files) {
-      for (const h of f.hunks) {
-        if ((states.get(h.contentHash)?.plotline ?? PLOTLINE_OTHER_ID) === (plotId ?? PLOTLINE_OTHER_ID)) {
-          return `diff:${f.fileKey}:${h.newStart}`;
-        }
-      }
-    }
-    return null;
-  };
-  const countOf = (plotId: string | undefined): number => {
-    let n = 0;
-    for (const f of files) {
-      for (const h of f.hunks) {
-        if ((states.get(h.contentHash)?.plotline ?? PLOTLINE_OTHER_ID) === (plotId ?? PLOTLINE_OTHER_ID)) n += 1;
-      }
-    }
-    return n;
-  };
-  const otherCount = countOf(undefined);
-  const plotlineOf = (id: string | undefined): Plotline | undefined =>
-    id === undefined ? undefined : plotlines.find((p) => p.id === id);
-  const nameOf = (id: string | undefined): string | undefined => {
-    if (id === undefined) return undefined;
-    return plotlineOf(id)?.name ?? id;
-  };
+  const rows = plotlineRows(plotlines, files ?? [], plotlineOf, inScope);
+  const sameGuide = (diffFilter?.guideId ?? null) === guideId;
   // Picking a plotline is a filter action (#190): filter the diff to
   // it and jump to its first hunk without clearing the file tree's
   // own filters. The builds-on chip (#242) picks the earlier
   // plotline the same way — it goes to that plotline.
   const pick = (plotId: string, ref: string | null): void => {
-    const active = snapshot?.diffFilter?.plotline === plotId;
+    const active = sameGuide && diffFilter?.plotline === plotId;
     const body = {
       plotline: active ? null : plotId,
-      score: snapshot?.diffFilter?.score ?? null,
+      score: diffFilter?.score ?? null,
+      guideId,
     };
     api
       .updateDiffFilter(reviewId, body)
@@ -112,41 +116,12 @@ function Plotlines({ reviewId }: { reviewId: string }): ReactNode {
         toast("Couldn't save the filter");
       });
   };
-  const rows = [
-    ...plotlines.map((p) => {
-      const buildsOn = plotlineOf(p.buildsOn);
-      return {
-        id: p.id,
-        name: p.name,
-        desc: p.description,
-        buildsOnId: buildsOn?.id,
-        buildsOnName: nameOf(p.buildsOn),
-        buildsOnRef: buildsOn ? firstRefOf(buildsOn.id) : null,
-        count: countOf(p.id),
-        ref: firstRefOf(p.id),
-      };
-    }),
-    ...(otherCount > 0
-      ? [
-          {
-            id: PLOTLINE_OTHER_ID,
-            name: "Other",
-            desc: "Hunks no plotline claimed.",
-            buildsOnId: undefined as string | undefined,
-            buildsOnName: undefined as string | undefined,
-            buildsOnRef: null as string | null,
-            count: otherCount,
-            ref: firstRefOf(undefined),
-          },
-        ]
-      : []),
-  ];
   return (
     <UiCard as="section" variant="inset" className="plotlines" aria-label="Plotlines">
       <h2>Plotlines</h2>
       <ul>
         {rows.map((r) => {
-          const active = snapshot?.diffFilter?.plotline === r.id;
+          const active = sameGuide && diffFilter?.plotline === r.id;
           const clickable = r.ref !== null;
           return (
             <li key={r.id}>
@@ -206,7 +181,40 @@ function Plotlines({ reviewId }: { reviewId: string }): ReactNode {
   );
 }
 
-export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard }: Props) {
+/** The main guide's plotlines (assignment rides `hunkStates`). */
+function MainPlotlines({ reviewId }: { reviewId: string }): ReactNode {
+  const plotlines = useReview((s) => s.snapshot?.plotlines);
+  const hunkStates = useReview((s) => s.snapshot?.hunkStates);
+  const plotlineOf = useMemo(() => {
+    const states = new Map((hunkStates ?? []).map((st) => [st.contentHash, st.plotline]));
+    return (_fileKey: string, contentHash: string): string | undefined => states.get(contentHash);
+  }, [hunkStates]);
+  return <Plotlines reviewId={reviewId} plotlines={plotlines ?? []} plotlineOf={plotlineOf} guideId={null} />;
+}
+
+/** A custom guide's own plotlines, counted over its hunks only. */
+function GuidePlotlines({ reviewId, guide }: { reviewId: string; guide: CustomGuide }): ReactNode {
+  const scope = useMemo(() => new Set(guide.hunks), [guide.hunks]);
+  const plotlineOf = useCallback(
+    (fileKey: string, contentHash: string) => guidePlotlineOf(guide, fileKey, contentHash),
+    [guide],
+  );
+  const inScope = useCallback(
+    (fileKey: string, contentHash: string) => scope.has(hunkCanonicalId(fileKey, contentHash)),
+    [scope],
+  );
+  return (
+    <Plotlines
+      reviewId={reviewId}
+      plotlines={guide.plotlines}
+      plotlineOf={plotlineOf}
+      inScope={inScope}
+      guideId={guide.id}
+    />
+  );
+}
+
+export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard, guide, top, intro, outro }: Props) {
   const [tocOpen, setTocOpen] = useState(true);
   const { title: identityTitle } = useReviewIdentity(reviewId);
   const isFinding = page.kind === "finding";
@@ -214,7 +222,11 @@ export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard 
   // A default-stored root ("Guide") shows the review title (PR title, else
   // branch); non-default roots and other pages keep today's display.
   const rootTitle =
-    page.kind === "root" && isDefaultGuideTitle(page.title) ? identityTitle : displayTitle(page.title);
+    page.kind === "guide" && guide
+      ? guide.title
+      : page.kind === "root" && isDefaultGuideTitle(page.title)
+        ? identityTitle
+        : displayTitle(page.title);
   const allPages = useReview((s) => s.snapshot?.pages);
   const jobs = useReview((s) => s.snapshot?.jobs ?? []);
   const inflight = useReview((s) => s.inflight);
@@ -228,11 +240,16 @@ export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard 
     while (cur && !seen.has(cur.id)) {
       seen.add(cur.id);
       trail.unshift(cur);
-      cur = cur.parent ? lookupPage(cur.parent) : undefined;
+      // A custom guide's trail stops at the guide's root page.
+      cur = cur.kind !== "guide" && cur.parent ? lookupPage(cur.parent) : undefined;
     }
   }
 
-  const eyebrow = isFinding ? `Agent finding · ${page.confidence ?? ""} confidence` : "";
+  const eyebrow = isFinding
+    ? `Agent finding · ${page.confidence ?? ""} confidence`
+    : page.kind === "guide"
+      ? "Custom guide"
+      : "";
 
   const goDeeperIndex = page.cards.findIndex((c) => c.pending);
 
@@ -286,6 +303,7 @@ export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard 
 
   return (
     <div className={`doc${isFinding ? " finding" : ""}`}>
+      {top}
       {trail.length > 1 ? (
         <nav className="crumbs" aria-label="Trail">
           {trail.map((p, i) =>
@@ -318,57 +336,62 @@ export function PageView({ reviewId, page, lookupPage, onOpenPage, onJumpToCard 
           <span>{conceptWorking}</span>
         </div>
       ) : null}
-      <UiCard as="nav" variant="inset" className="toc" aria-label="Contents">
-        <div className="toc-h">
-          <button
-            className="ib"
-            type="button"
-            data-tip={tocOpen ? "Hide contents" : "Show contents"}
-            aria-label={tocOpen ? "Hide contents" : "Show contents"}
-            data-toc=""
-            onClick={() => setTocOpen((v) => !v)}
-          >
-            <Icon name={tocOpen ? "down" : "right"} />
-          </button>
-          <span>Contents</span>
-        </div>
-        {tocOpen ? (
-          <div className="toc-g">
-            <div>
-              <h3>On this page</h3>
-              <ul>
-                {cards.map((entry) => (
-                  <li key={entry.id}>
-                    <button
-                      type="button"
-                      data-tocard={entry.id}
-                      onClick={() => onJumpToCard(entry.id)}
-                    >
-                      <span className="tt">{entry.title}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            {links.length ? (
+      {intro}
+      {page.kind === "guide" && cards.length === 0 && links.length === 0 ? null : (
+        <UiCard as="nav" variant="inset" className="toc" aria-label="Contents">
+          <div className="toc-h">
+            <button
+              className="ib"
+              type="button"
+              data-tip={tocOpen ? "Hide contents" : "Show contents"}
+              aria-label={tocOpen ? "Hide contents" : "Show contents"}
+              data-toc=""
+              onClick={() => setTocOpen((v) => !v)}
+            >
+              <Icon name={tocOpen ? "down" : "right"} />
+            </button>
+            <span>Contents</span>
+          </div>
+          {tocOpen ? (
+            <div className="toc-g">
               <div>
-                <h3>Linked pages</h3>
+                <h3>On this page</h3>
                 <ul>
-                  {links.map((entry) => (
+                  {cards.map((entry) => (
                     <li key={entry.id}>
-                      <button type="button" data-node={entry.id} onClick={() => onOpenPage(entry.id)}>
+                      <button
+                        type="button"
+                        data-tocard={entry.id}
+                        onClick={() => onJumpToCard(entry.id)}
+                      >
                         <span className="tt">{entry.title}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
               </div>
-            ) : null}
-          </div>
-        ) : null}
-      </UiCard>
-      {page.kind === "root" ? <Plotlines reviewId={reviewId} /> : null}
+              {links.length ? (
+                <div>
+                  <h3>Linked pages</h3>
+                  <ul>
+                    {links.map((entry) => (
+                      <li key={entry.id}>
+                        <button type="button" data-node={entry.id} onClick={() => onOpenPage(entry.id)}>
+                          <span className="tt">{entry.title}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </UiCard>
+      )}
+      {page.kind === "root" ? <MainPlotlines reviewId={reviewId} /> : null}
+      {page.kind === "guide" && guide ? <GuidePlotlines reviewId={reviewId} guide={guide} /> : null}
       {page.cards.map(renderCard)}
+      {outro}
     </div>
   );
 }

@@ -18,6 +18,8 @@ import type {
   ActionResponse,
   AddRepoRequest,
   AddRepoResponse,
+  CustomGuide,
+  CustomGuideResponse,
   ChangesFilter,
   Contribution,
   CreateDocumentRequest,
@@ -62,6 +64,7 @@ import type {
 } from "@unvibe/shared";
 import type { ApiClient } from "../api/client.js";
 import { UpdateJobsBlockedError } from "../api/updateBlocked.js";
+import { CUSTOM_GUIDE_PROMPT_MAX, customGuideCardId, customGuideFallbackTitle, customGuidePageId } from "@unvibe/shared";
 import { buildOutboxExportMarkdown, freshBlockId, outboxThreads, parseDocumentMarkdown, parseGitHubRepoInput, renderUntrustedMarkdown } from "@unvibe/shared";
 import { useReview } from "../state/store.js";
 import { HUNK_SUMMARIES, MOCK_FILES } from "./diff.js";
@@ -941,6 +944,8 @@ export function resetMockState(): void {
   mockUpdateDown = false;
   mockSoSeq = 0;
   mockDiffFilter = undefined;
+  mockGuides = [];
+  mockGuideSeq = 0;
   for (const p of pendingSecondOpinions) window.clearTimeout(p.timer);
   pendingSecondOpinions = [];
   try {
@@ -1133,6 +1138,7 @@ function currentSnapshot(reviewId = "demo", version?: number): ReviewSnapshot {
     existingComments,
     plotlines: [...MOCK_PLOTLINES],
     ...(mockDiffFilter !== undefined ? { diffFilter: { ...mockDiffFilter } } : {}),
+    ...(reviewId === "demo" && mockGuides.length > 0 ? { guides: JSON.parse(JSON.stringify(mockGuides)) as CustomGuide[] } : {}),
   };
   if (stale && viewing === 2) base.versionStatus = staleVersionStatus();
   return base;
@@ -1792,7 +1798,263 @@ function mockFailedSnapshot(entry: ReviewSummary, error: string): ReviewSnapshot
   };
 }
 
+// --- custom guides ---------------------------------------------------------
+
+/**
+ * Custom guides in mock mode: any request produces a guide over the
+ * demo's header-unfolding code and its unit tests (the socket-level test
+ * and the changelog stay out, so the diff visibly narrows), with two
+ * sections, two plotlines and one suggested diff comment. The run goes
+ * "working" (the first section streams in, then the second) and lands
+ * "ready". A request naming a relative day ("today", "yesterday") is
+ * ambiguous: the guide goes "needs-input" with a question first and
+ * generates once the reader answers.
+ */
+let mockGuides: CustomGuide[] = [];
+let mockGuideSeq = 0;
+const MOCK_GUIDE_AMBIGUOUS = /\b(today|yesterday)\b/i;
+
+function emitGuides(): void {
+  const baseRev = rev;
+  rev += 1;
+  useReview.getState().applyEvent({
+    type: "patch",
+    baseRev,
+    headRev: rev,
+    ops: [{ op: "replace", path: "/guides", value: JSON.parse(JSON.stringify(mockGuides)) }],
+  });
+}
+
+function mockGuideText(prompt: string): string {
+  const text = prompt.trim();
+  if (text === "") throw new Error("prompt is required");
+  if (text.length > CUSTOM_GUIDE_PROMPT_MAX) {
+    throw new Error(`prompt must be at most ${CUSTOM_GUIDE_PROMPT_MAX} characters`);
+  }
+  return text;
+}
+
+function mockGuideCard(guideId: string, n: number, title: string, text: string, cite: string): import("@unvibe/shared").Card {
+  return {
+    id: customGuideCardId(guideId, n),
+    pageId: customGuidePageId(guideId),
+    title,
+    level: "standard",
+    collapsed: false,
+    revision: 1,
+    undoStack: [],
+    blocks: [
+      {
+        type: "paragraph",
+        id: "b1",
+        text: { standard: text, simple: text, deep: text },
+        citations: [{ target: cite }],
+      } as unknown as import("@unvibe/shared").Block,
+    ],
+  };
+}
+
+/** Write the guide's root page with its first `n` sections. */
+function setMockGuidePage(guide: CustomGuide, n: number): void {
+  const conn = MOCK_FILES.find((f) => f.path === "src/urllib3/connection.py");
+  const tconn = MOCK_FILES.find((f) => f.path === "test/test_connection.py");
+  const cards = [
+    mockGuideCard(
+      guide.id,
+      1,
+      "Where folded values get unfolded",
+      "The response's headers are normalized once, where urllib3 copies them into its own header type: each obsolete fold becomes a single space before any caller reads the value.",
+      `diff:${conn?.fileKey ?? ""}:${conn?.hunks[0]?.newStart ?? 1}`,
+    ),
+    mockGuideCard(
+      guide.id,
+      2,
+      "How the tests pin it down",
+      "The unit tests feed folded values through the same path and check that no CR or LF survives in what callers see.",
+      `diff:${tconn?.fileKey ?? ""}:${tconn?.hunks[0]?.newStart ?? 1}`,
+    ),
+  ].slice(0, n);
+  const page: import("@unvibe/shared").Page = {
+    id: guide.pageId,
+    kind: "guide",
+    title: guide.title,
+    guideId: guide.id,
+    cards,
+  };
+  const idx = mockPages.findIndex((p) => p.id === guide.pageId);
+  if (idx >= 0) mockPages[idx] = page;
+  else mockPages.push(page);
+  emitPages();
+}
+
+/** The guide's scope, plotlines and suggested comment (the agent's reply). */
+function finishMockGuide(guide: CustomGuide): void {
+  const conn = MOCK_FILES.find((f) => f.path === "src/urllib3/connection.py");
+  const tconn = MOCK_FILES.find((f) => f.path === "test/test_connection.py");
+  const ids = (f: (typeof MOCK_FILES)[number] | undefined): string[] =>
+    f ? f.hunks.map((h) => `h:${f.fileKey}:${h.contentHash}`) : [];
+  const core = ids(conn);
+  const tests = ids(tconn);
+  guide.hunks = [...core, ...tests];
+  guide.commits = [MOCK_VERSION.headSha];
+  guide.scopeNote = "The header-unfolding change and its unit tests; the socket-level test and the changelog are left out.";
+  guide.plotlines = [
+    { id: "g-core", name: "Normalize on read", description: "Folds become spaces where headers are copied." },
+    { id: "g-tests", name: "Pin it with tests", description: "Unit coverage for folded values.", buildsOn: "g-core" },
+  ];
+  guide.assignment = Object.fromEntries([
+    ...core.map((h) => [h, "g-core"] as const),
+    ...tests.slice(0, 2).map((h) => [h, "g-tests"] as const),
+  ]);
+  guide.version = MOCK_VERSION.n;
+  delete guide.stale;
+  // A rerun replaces the guide's suggestions the reader has not marked.
+  annotations = annotations.filter((a) => a.guideId !== guide.id || a.post);
+  const hunk = conn?.hunks[0];
+  const line = hunk?.lines.find((l) => l.kind === "add")?.newLine ?? hunk?.newStart ?? 1;
+  annotations.push({
+    id: `ann_mockcg${guide.id.slice(3)}${mockGuideSeq}`,
+    type: "comment",
+    guideId: guide.id,
+    anchor: {
+      host: { kind: "diff-line", fileKey: conn?.fileKey ?? "", line },
+      quotedText: "",
+      prefix: "",
+      suffix: "",
+      position: 0,
+      version: 1,
+    },
+    open: true,
+    pinned: false,
+    messages: [
+      {
+        who: "ai",
+        text: "Worth a test where the fold uses a bare LF, not CRLF: this path should unfold both.",
+        suggested: true,
+      },
+    ],
+    post: false,
+  });
+  emitAnnotations();
+}
+
+/** One mock generation run: working → sections stream in → ready. */
+async function runMockGuide(guideId: string): Promise<string> {
+  const guide = mockGuides.find((g) => g.id === guideId);
+  if (!guide) throw new Error("unknown custom guide");
+  mockGuideSeq += 1;
+  const jobId = `job_mockcg_${mockGuideSeq}`;
+  guide.status = "working";
+  guide.jobId = jobId;
+  delete guide.question;
+  delete guide.error;
+  trackMockJob(jobId, "custom-guide");
+  emitGuides();
+  const live = (): CustomGuide | undefined => {
+    const g = mockGuides.find((x) => x.id === guideId);
+    return g && g.jobId === jobId ? g : undefined;
+  };
+  void (async () => {
+    await wait(500);
+    const first = live();
+    if (!first) return;
+    setMockGuidePage(first, 1);
+    await wait(700);
+    const done = live();
+    if (!done) return;
+    finishMockGuide(done);
+    setMockGuidePage(done, 2);
+    done.status = "ready";
+    delete done.jobId;
+    settleMockJob(jobId);
+    emitGuides();
+  })();
+  return jobId;
+}
+
+function mockGuideResponse(guideId: string, jobId?: string): CustomGuideResponse {
+  const guide = mockGuides.find((g) => g.id === guideId);
+  if (!guide) throw new Error("unknown custom guide");
+  return { guide: JSON.parse(JSON.stringify(guide)) as CustomGuide, ...(jobId !== undefined ? { jobId } : {}) };
+}
+
+const mockGuideApi = {
+  createGuide: async (_id: string, body: { prompt: string }): Promise<CustomGuideResponse> => {
+    await wait(80);
+    const prompt = mockGuideText(body.prompt);
+    const id = `gd-${Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0")}`;
+    const now = Date.now();
+    const guide: CustomGuide = {
+      id,
+      title: customGuideFallbackTitle(prompt),
+      prompt,
+      turns: [{ who: "you", text: prompt, at: now }],
+      status: "working",
+      pageId: customGuidePageId(id),
+      commits: [],
+      hunks: [],
+      plotlines: [],
+      assignment: {},
+      version: MOCK_VERSION.n,
+      createdAt: now,
+    };
+    mockGuides.push(guide);
+    if (MOCK_GUIDE_AMBIGUOUS.test(prompt)) {
+      const question =
+        "Which commits count as today's: the ones authored today, or the ones pushed to the branch today?";
+      guide.status = "needs-input";
+      guide.question = question;
+      guide.turns.push({ who: "agent", text: question, at: now });
+      emitGuides();
+      return mockGuideResponse(id);
+    }
+    const jobId = await runMockGuide(id);
+    return mockGuideResponse(id, jobId);
+  },
+
+  answerGuide: async (_id: string, guideId: string, body: { answer: string }): Promise<CustomGuideResponse> => {
+    await wait(80);
+    const answer = mockGuideText(body.answer);
+    const guide = mockGuides.find((g) => g.id === guideId);
+    if (!guide) throw new Error("unknown custom guide");
+    if (guide.status !== "needs-input") throw new Error("the guide is not waiting for an answer");
+    guide.turns.push({ who: "you", text: answer, at: Date.now() });
+    const jobId = await runMockGuide(guideId);
+    return mockGuideResponse(guideId, jobId);
+  },
+
+  regenerateGuide: async (_id: string, guideId: string): Promise<CustomGuideResponse> => {
+    await wait(80);
+    const jobId = await runMockGuide(guideId);
+    return mockGuideResponse(guideId, jobId);
+  },
+
+  deleteGuide: async (_id: string, guideId: string): Promise<void> => {
+    await wait(60);
+    const guide = mockGuides.find((g) => g.id === guideId);
+    if (!guide) throw new Error("unknown custom guide");
+    if (guide.jobId) {
+      const job = mockJobs.find((j) => j.id === guide.jobId);
+      if (job && job.state === "running") {
+        job.state = "cancelled";
+        emitJobs();
+      }
+    }
+    mockGuides = mockGuides.filter((g) => g.id !== guideId);
+    mockPages = mockPages.filter((p) => p.guideId !== guideId);
+    annotations = annotations.filter((a) => a.guideId !== guideId || a.post);
+    if (mockDiffFilter?.guideId === guideId) {
+      mockDiffFilter = mockDiffFilter.score !== undefined ? { score: mockDiffFilter.score } : undefined;
+      emitDiffFilter();
+    }
+    emitPages();
+    emitAnnotations();
+    emitGuides();
+  },
+};
+
 export const mockApi = {
+  ...mockGuideApi,
   health: async () => {
     if (mockUpdateDown) throw new Error("mock service restarting");
     return { ok: true as const, version: "mock", build: mockUpdateBuild() };
@@ -3200,9 +3462,16 @@ export const mockApi = {
   // Issue #169: mirrors the service PATCH semantics (null clears a field;
   // unknown plotlines and levels are refused).
   updateDiffFilter: async (_id: string, body: UpdateDiffFilterRequest): Promise<{ ok: boolean }> => {
-    const { plotline, score } = body;
+    const { plotline, score, guideId } = body;
+    // Custom guides: absent keeps the guide, null returns to the main
+    // guide; switching guides drops a plotline pick unless one is sent.
+    if (typeof guideId === "string" && !mockGuides.some((g) => g.id === guideId)) {
+      throw new Error(`unknown custom guide ${guideId}`);
+    }
+    const effectiveGuide = guideId === undefined ? mockDiffFilter?.guideId : (guideId ?? undefined);
     if (plotline !== undefined && plotline !== null) {
-      const ids = new Set([...MOCK_PLOTLINES.map((p) => p.id), "other"]);
+      const guide = mockGuides.find((g) => g.id === effectiveGuide);
+      const ids = new Set([...(guide ? guide.plotlines : MOCK_PLOTLINES).map((p) => p.id), "other"]);
       if (!ids.has(plotline)) throw new Error(`unknown plotline ${plotline}`);
     }
     if (score !== undefined && score !== null) {
@@ -3210,6 +3479,11 @@ export const mockApi = {
       if (!levels.includes(score)) throw new Error(`unknown score ${score}`);
     }
     const next: DiffFilter = { ...(mockDiffFilter ?? {}) };
+    if (guideId !== undefined && (guideId ?? undefined) !== next.guideId) {
+      if (guideId === null) delete next.guideId;
+      else next.guideId = guideId;
+      if (plotline === undefined) delete next.plotline;
+    }
     if (plotline === null) delete next.plotline;
     else if (plotline !== undefined) next.plotline = plotline;
     if (score === null) delete next.score;

@@ -24,6 +24,7 @@ import { ErrorBoundary, InlineFallback } from "../../components/ErrorBoundary.js
 import { Icon } from "../../components/Icon.js";
 import { toast } from "../../floating/Toast.js";
 import { useReview } from "../../state/store.js";
+import { GuideFilterChip } from "./GuideFilterChip.js";
 import {
   statusToBanner,
   VersionBanner,
@@ -37,6 +38,8 @@ import {
   buildFileTree,
   citedHunkHashes,
   filterFiles,
+  guideHunkStates,
+  hunkInScope,
   hunkOverlaps,
   shouldHideHunk,
   tailPathParts,
@@ -206,6 +209,15 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
     setPlotFilter(snapshot?.diffFilter ? { ...snapshot.diffFilter } : {});
   }, [reviewId, storedFilterKey, snapshot?.diffFilter]);
 
+  // Custom guides: while one is open (filter `guideId`), only its hunks
+  // show and plotlines mean that guide's own (its assignment replaces
+  // the main guide's in the hunk states below).
+  const activeGuide = useMemo(
+    () => (plotFilter.guideId ? (snapshot?.guides ?? []).find((g) => g.id === plotFilter.guideId) : undefined),
+    [plotFilter.guideId, snapshot?.guides],
+  );
+  const guideScope = useMemo(() => (activeGuide ? new Set(activeGuide.hunks) : undefined), [activeGuide]);
+
   // Snapshot: the guide column fetches it too; fetch here when absent so the
   // diff pane works standalone (tests, deep links). `?version=n` views an
   // older version read-only (PRD §8).
@@ -269,10 +281,11 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
   }, []);
 
   // Hunk states keyed by content hash for the file sections below.
-  const states = useMemo(
-    () => new Map<string, HunkUiState>((snapshot?.hunkStates ?? []).map((s) => [s.contentHash, s])),
-    [snapshot],
-  );
+  const states = useMemo(() => {
+    const base = new Map<string, HunkUiState>((snapshot?.hunkStates ?? []).map((s) => [s.contentHash, s]));
+    if (!activeGuide) return base;
+    return guideHunkStates<HunkUiState>(snapshot?.files ?? [], base, activeGuide.assignment, () => ({ folded: false, reviewed: false }));
+  }, [snapshot, activeGuide]);
 
   // File fold state lives on the snapshot (issue #162), so it survives
   // tab switches, reloads and restarts — unlike the old local state.
@@ -362,9 +375,10 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
             reviewedCount,
             ...(plotActive ? { plot: plotFilter } : {}),
             hunkStateOf,
+            ...(guideScope ? { scope: guideScope } : {}),
           })
         : [],
-    [snapshot, fq, cats, prefs.hideReviewed, reviewedCount, plotActive, plotFilter, hunkStateOf],
+    [snapshot, fq, cats, prefs.hideReviewed, reviewedCount, plotActive, plotFilter, hunkStateOf, guideScope],
   );
 
   const progress = useMemo(() => {
@@ -452,11 +466,16 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
     [plotFilter, setPlotFilterAndPersist],
   );
   const hiddenHunks = useMemo(() => {
-    const shown = visible.reduce((s, f) => s + f.hunks.length, 0);
-    return Math.max(0, progress.total - shown);
-  }, [visible, progress.total]);
+    const inScope = (f: ReviewFile): number => f.hunks.filter((h) => hunkInScope(f.fileKey, h, guideScope)).length;
+    const shown = visible.reduce((s, f) => s + inScope(f), 0);
+    const total = guideScope ? (snapshot?.files ?? []).reduce((s, f) => s + inScope(f), 0) : progress.total;
+    return Math.max(0, total - shown);
+  }, [visible, progress.total, guideScope, snapshot?.files]);
 
-  const plotlines: Plotline[] = useMemo(() => snapshot?.plotlines ?? [], [snapshot?.plotlines]);
+  const plotlines: Plotline[] = useMemo(
+    () => activeGuide?.plotlines ?? snapshot?.plotlines ?? [],
+    [activeGuide, snapshot?.plotlines],
+  );
   const plotlineNames = useMemo(() => new Map(plotlines.map((p) => [p.id, p.name])), [plotlines]);
 
   const doReveal = useCallback(
@@ -485,13 +504,23 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
       if (!keepFilters && target.start !== undefined) {
         const end = target.end ?? target.start;
         const activeFilter = snap.diffFilter ?? plotFilter;
-        const seen = file.hunks.some(
+        // Inside a custom guide the guide's own plotlines apply, and the
+        // guide's scope stays: code outside it is not shown here.
+        const guide = activeFilter.guideId ? (snap.guides ?? []).find((g) => g.id === activeFilter.guideId) : undefined;
+        const scope = guide ? new Set(guide.hunks) : undefined;
+        const plotOf = (h: Hunk): string | undefined =>
+          guide ? guide.assignment[`h:${file.fileKey}:${h.contentHash}`] : st.get(h.contentHash)?.plotline;
+        const overlapping = file.hunks.filter((h) => hunkOverlaps(h, target.start as number, end));
+        if (scope && overlapping.length > 0 && !overlapping.some((h) => hunkInScope(file.fileKey, h, scope))) {
+          toast("That code is outside this guide. Switch to the main guide to see it.");
+        }
+        const seen = overlapping.some(
           (h) =>
-            hunkOverlaps(h, target.start as number, end) &&
-            hunkMatchesFilter(st.get(h.contentHash)?.score, st.get(h.contentHash)?.plotline, activeFilter),
+            hunkInScope(file.fileKey, h, scope) &&
+            hunkMatchesFilter(st.get(h.contentHash)?.score, plotOf(h), activeFilter),
         );
         if (!seen && (activeFilter.plotline !== undefined || activeFilter.score !== undefined)) {
-          setPlotFilterAndPersist({});
+          setPlotFilterAndPersist(activeFilter.guideId ? { guideId: activeFilter.guideId } : {});
         }
       }
       void patchFileFold(file.fileKey, false);
@@ -620,7 +649,8 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
     }
     const snap = useReview.getState().snapshot;
     if (!snap) return;
-    const st = new Map(snap.hunkStates.map((s) => [s.contentHash, s]));
+    // The view's hunk states (a custom guide's plotlines when one is open).
+    const st = states;
     const targets: { file: ReviewFile; hunk: Hunk }[] = [];
     for (const f of filterFiles(snap.files, {
       query: fq,
@@ -632,8 +662,10 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
         const s = st.get(hash);
         return s ? { score: s.score, plotline: s.plotline } : undefined;
       },
+      ...(guideScope ? { scope: guideScope } : {}),
     })) {
       f.hunks.forEach((h) => {
+        if (!hunkInScope(f.fileKey, h, guideScope)) return;
         if (
           shouldHideHunk(h, {
             hideUninteresting: prefs.hideUninteresting,
@@ -673,7 +705,7 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
           "This review is past the per-hunk summary limit, so summaries stay on demand — use the spark button on any hunk.",
       );
     }
-  }, [reviewId, readOnly, fq, prefs, reviewedCount, unhidden, cited, actions, plotActive, plotFilter]);
+  }, [reviewId, readOnly, fq, prefs, reviewedCount, unhidden, cited, actions, plotActive, plotFilter, states, guideScope]);
 
   const unfoldAll = useCallback(async () => {
     if (readOnly) {
@@ -741,6 +773,7 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
   return (
     <div>
       <div className="dtool">
+        {activeGuide ? <GuideFilterChip reviewId={reviewId} title={activeGuide.title} hunks={activeGuide.hunks.length} /> : null}
         {plotFilter.score !== undefined ? (
           <span className="fchip" data-filterchip="score">
             Score: {HUNK_SCORE_LABELS[plotFilter.score].toLowerCase()} or higher · {hiddenHunks} hidden
@@ -990,6 +1023,7 @@ export function DiffView({ reviewId, lineSlots, commentedLines, onLineClick, loo
               onOpenPage={onOpenPage ?? (() => {})}
               onFollowUp={onFollowUp ?? (() => {})}
               plotFilter={plotActive ? plotFilter : undefined}
+              scope={guideScope}
               plotlineNames={plotlineNames}
               onSelectScore={toggleScore}
               onSelectPlotline={togglePlotline}

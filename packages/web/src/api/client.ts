@@ -8,12 +8,15 @@ import type {
   AcceptContributionResponse,
   ActionResponse,
   AddRepoRequest,
+  AnswerCustomGuideRequest,
   AddRepoResponse,
   ChangesFilter,
   ContributionsResponse,
   CreateCommentRequest,
   CreateCommentResponse,
+  CreateCustomGuideRequest,
   CreateDocumentRequest,
+  CustomGuideResponse,
   CreateReviewRequest,
   CreateReviewResponse,
   DeleteContributionResponse,
@@ -359,6 +362,21 @@ const realApi = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+
+  /** Custom guides: create one from the reader's request (202; streams over WS). */
+  createGuide: (id: string, body: CreateCustomGuideRequest): Promise<CustomGuideResponse> =>
+    post(`/api/reviews/${encodeURIComponent(id)}/guides`, body),
+  /** Answer a custom guide's clarifying question; generation continues. */
+  answerGuide: (id: string, guideId: string, body: AnswerCustomGuideRequest): Promise<CustomGuideResponse> =>
+    post(`/api/reviews/${encodeURIComponent(id)}/guides/${encodeURIComponent(guideId)}/answer`, body),
+  regenerateGuide: (id: string, guideId: string): Promise<CustomGuideResponse> =>
+    post(`/api/reviews/${encodeURIComponent(id)}/guides/${encodeURIComponent(guideId)}/regenerate`),
+  /** Remove a custom guide, its pages and its suggested comments not marked for the PR. */
+  deleteGuide: (id: string, guideId: string): Promise<void> =>
+    // 204, no JSON body: read it as text.
+    requestText(`/api/reviews/${encodeURIComponent(id)}/guides/${encodeURIComponent(guideId)}`, {
+      method: "DELETE",
+    }).then(() => undefined),
 
   /** Raw file lines at a commit (issue #133: diff expansion). */
   fileSlice: (

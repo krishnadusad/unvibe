@@ -6,12 +6,17 @@
  * In-app navigation keeps the page id in the URL with browser back/forward
  * working: the root lives at `/review/:id`, other pages at
  * `/review/:id/page/:pageId` (the route is `/review/:id/*`; see `App.tsx`).
+ * A custom guide's root lives at `/review/:id/guide/:guideId` and its
+ * child pages at `/review/:id/guide/:guideId/page/:pageId`
+ * (`customGuideRoutes.ts`); a guide page reached by a main-guide URL is
+ * redirected there.
  * Listens for `unvibe:guide-block` (`{ cardId, blockId }` in `detail`,
  * sent by "Restated →" links in the description tab): opens the block's
  * page, expands its card, scrolls and highlights it.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import type { Page } from "@unvibe/shared";
 import { isDocumentReview } from "@unvibe/shared";
 import { api, friendlyError } from "../api/client.js";
 import { ErrorBoundary, InlineFallback } from "../components/ErrorBoundary.js";
@@ -21,15 +26,11 @@ import { useReviewVersion } from "../versions/useReviewVersion.js";
 import { GUIDE_BLOCK_EVENT, performAction, scrollToBlock, type GuideBlockRequest } from "./actions.js";
 import { emptyGuideState } from "./guideUtils.js";
 import { DocumentView } from "./DocumentView.js";
+import { guidePagePath, parseGuideSplat } from "./customGuideRoutes.js";
+import { CustomGuideIntro, GuideSwitcher, isJustCreatedGuide, settleJustCreatedGuide, SuggestedComments } from "./CustomGuides.js";
 import { PageView } from "./PageView.js";
 import { Button, PaneLoading } from "../ui/index.js";
 import "./guide-m2.css";
-
-function pageIdFromSplat(splat: string | undefined): string | null {
-  if (!splat) return null;
-  const m = splat.match(/^page\/([^/]+)$/);
-  return m ? decodeURIComponent(m[1]) : null;
-}
 
 export function GuidePage({ reviewId }: { reviewId: string }) {
   const snapshot = useReview((s) => s.snapshot);
@@ -54,8 +55,8 @@ export function GuidePage({ reviewId }: { reviewId: string }) {
     };
   }, [reviewId, versionParam, setSnapshot]);
 
-  const pageId = pageIdFromSplat(splat);
-  const pageKey = pageId ?? "root";
+  const { guideId, pageId } = parseGuideSplat(splat);
+  const pageKey = `${guideId ?? ""}:${pageId ?? "root"}`;
   // Guide error-state retry (issue #86, finding 14): re-enqueue the
   // unfinished pipeline stages, then converge on the fresh snapshot.
   const [retrying, setRetrying] = useState(false);
@@ -104,9 +105,10 @@ export function GuidePage({ reviewId }: { reviewId: string }) {
 
   const onOpenPage = useCallback(
     (next: string | null) => {
-      navigate(next === null ? `/review/${reviewId}` : `/review/${reviewId}/page/${encodeURIComponent(next)}`);
+      const target = next === null ? undefined : useReview.getState().snapshot?.pages.find((p) => p.id === next);
+      navigate(guidePagePath(reviewId, next, target, guideId));
     },
-    [navigate, reviewId],
+    [navigate, reviewId, guideId],
   );
 
   const onJumpToCard = useCallback(
@@ -130,11 +132,12 @@ export function GuidePage({ reviewId }: { reviewId: string }) {
   useEffect(() => {
     const onRequest = (e: Event): void => {
       const { cardId, blockId } = (e as CustomEvent<GuideBlockRequest>).detail;
-      scrollToBlock(onOpenPage, pageId ?? "root", cardId, blockId);
+      const current = pageId ?? (guideId ? (useReview.getState().snapshot?.guides ?? []).find((g) => g.id === guideId)?.pageId : undefined);
+      scrollToBlock(onOpenPage, current ?? "root", cardId, blockId);
     };
     window.addEventListener(GUIDE_BLOCK_EVENT, onRequest);
     return () => window.removeEventListener(GUIDE_BLOCK_EVENT, onRequest);
-  }, [onOpenPage, pageId]);
+  }, [onOpenPage, pageId, guideId]);
 
   // Card deep links (`/review/:id#C-<cardId>`): the snapshot loads async,
   // so poll briefly for the card element instead of relying on the
@@ -213,7 +216,30 @@ export function GuidePage({ reviewId }: { reviewId: string }) {
     );
   }
 
-  const current = pageId === null ? pages.find((p) => p.kind === "root") ?? pages[0] : lookupPage(pageId);
+  const switcher = <GuideSwitcher reviewId={reviewId} activeGuideId={guideId} />;
+  if (guideId !== null) {
+    return (
+      <CustomGuidePane
+        reviewId={reviewId}
+        guideId={guideId}
+        pageId={pageId}
+        switcher={switcher}
+        lookupPage={lookupPage}
+        onOpenPage={onOpenPage}
+        onJumpToCard={onJumpToCard}
+      />
+    );
+  }
+
+  // A custom guide's page reached through a main-guide URL (a comment
+  // link, a citation) opens on its guide's route.
+  const routed = pageId !== null ? lookupPage(pageId) : undefined;
+  if (routed?.guideId) {
+    return <Navigate replace to={guidePagePath(reviewId, routed.id, routed, null)} />;
+  }
+
+  const current =
+    pageId === null ? (pages.find((p) => p.kind === "root") ?? pages.find((p) => !p.guideId)) : lookupPage(pageId);
   // Reviews whose guide is not built yet have no pages; the version
   // selector lives in the review bar, so it still switches here.
   if (!current && pageId === null) {
@@ -284,9 +310,95 @@ export function GuidePage({ reviewId }: { reviewId: string }) {
           lookupPage={lookupPage}
           onOpenPage={onOpenPage}
           onJumpToCard={onJumpToCard}
+          top={switcher}
         />
       </ErrorBoundary>
     </>
+  );
+}
+
+/**
+ * A custom guide's root (`pageId` null) or child page. The root shows
+ * before its first card lands (working, or waiting on the reader's
+ * answer) as an empty guide page with the guide's state.
+ */
+function CustomGuidePane({
+  reviewId,
+  guideId,
+  pageId,
+  switcher,
+  lookupPage,
+  onOpenPage,
+  onJumpToCard,
+}: {
+  reviewId: string;
+  guideId: string;
+  pageId: string | null;
+  switcher: ReactNode;
+  lookupPage: (id: string) => Page | undefined;
+  onOpenPage: (id: string | null) => void;
+  onJumpToCard: (cardId: string) => void;
+}) {
+  const guide = useReview((s) => (s.snapshot?.guides ?? []).find((g) => g.id === guideId));
+  const arrived = guide !== undefined;
+  useEffect(() => {
+    if (arrived) settleJustCreatedGuide(guideId);
+  }, [arrived, guideId]);
+  if (!guide) {
+    if (isJustCreatedGuide(guideId)) {
+      return (
+        <div className="doc pane-loading-pad">
+          <PaneLoading label="Starting the guide" />
+        </div>
+      );
+    }
+    return (
+      <div className="doc" data-testid="guide-missing">
+        {switcher}
+        <h1 className="title">Guide not found</h1>
+        <p className="hint">
+          This custom guide is gone (it may have been deleted).{" "}
+          <button type="button" className="x" onClick={() => onOpenPage(null)}>
+            Back to the main guide
+          </button>
+        </p>
+      </div>
+    );
+  }
+  const isRoot = pageId === null || pageId === guide.pageId;
+  const page: Page | undefined = isRoot
+    ? (lookupPage(guide.pageId) ?? { id: guide.pageId, kind: "guide", title: guide.title, guideId: guide.id, cards: [] })
+    : lookupPage(pageId);
+  if (!page) {
+    return (
+      <div className="doc">
+        {switcher}
+        <PaneLoading label="Opening the page" />
+      </div>
+    );
+  }
+  return (
+    <ErrorBoundary
+      name="guide-page"
+      resetKey={`${reviewId}:${guideId}:${page.id}`}
+      fallback={({ reset }) => (
+        <div className="doc">
+          <InlineFallback message="Couldn't show the guide: something went wrong" onRetry={reset} />
+        </div>
+      )}
+    >
+      <PageView
+        reviewId={reviewId}
+        page={page}
+        lookupPage={lookupPage}
+        onOpenPage={onOpenPage}
+        onJumpToCard={onJumpToCard}
+        guide={guide}
+        top={switcher}
+        intro={isRoot ? <CustomGuideIntro reviewId={reviewId} guide={guide} /> : undefined}
+        outro={isRoot ? <SuggestedComments reviewId={reviewId} guide={guide} /> : undefined}
+      />
+    </ErrorBoundary>
   );
 }
 

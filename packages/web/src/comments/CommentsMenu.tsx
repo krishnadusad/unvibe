@@ -41,7 +41,7 @@ import { requestGuideBlock } from "../guide/actions.js";
 import { REVEAL_EVENT, ensureDiffVisible } from "../source/diff/revealSource.js";
 import { revealSource } from "../source/reveal.js";
 import { showGuidePane } from "../shell/panes.js";
-import { useReview } from "../state/store.js";
+import { useReview, useVisibleAnnotations } from "../state/store.js";
 import { descriptionPaneName } from "../source/description/paneName.js";
 import { useIsReadOnlyVersion } from "./readOnly.js";
 import { Badge, Button, ListRow } from "../ui/index.js";
@@ -308,12 +308,15 @@ export function CommentsMenu({ reviewId }: { reviewId: string }) {
   // Issue #136: the menu lists comments only. Conversations (Explain
   // and Ask cards) never appear here; they are found through their
   // dotted links in place.
+  // Custom guides: a guide's suggested comments list only inside that
+  // guide until marked for the PR (then they are in the Outbox anyway).
+  const visible = useVisibleAnnotations();
   const threads = useMemo(
     () =>
-      ((snapshot?.annotations ?? []).filter(
+      ((visible ?? []).filter(
         (a) => a.type === "comment" && (a as Annotation).messages.length > 0,
       ) as Annotation[]),
-    [snapshot],
+    [visible],
   );
   // Owner decision A (#226): disjoint sections — This review holds the
   // unmarked threads (posted ones return here), the Outbox the marked,

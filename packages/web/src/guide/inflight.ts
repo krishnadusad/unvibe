@@ -65,6 +65,8 @@ export function jobLabel(kind: JobKind): string {
       return inflightLabel("second_opinion");
     case "update-pass":
       return inflightLabel("update");
+    case "custom-guide":
+      return "Writing the guide…";
     default:
       return "Working…";
   }

@@ -20,8 +20,10 @@
  * clobber newer WS state (`incoming.rev < rev` is ignored; equal revs are
  * accepted so live job lists stay fresh).
  */
+import { useMemo } from "react";
 import { create } from "zustand";
-import type { Job, ReviewEvent, ReviewSnapshot, StatePatchOp } from "@unvibe/shared";
+import type { Annotation, Job, ReviewEvent, ReviewSnapshot, StatePatchOp } from "@unvibe/shared";
+import { annotationVisibleIn } from "@unvibe/shared";
 
 type PatchEvent = Extract<ReviewEvent, { type: "patch" }>;
 
@@ -147,6 +149,13 @@ interface ReviewState {
    * refetches the snapshot on change; the fresh snapshot drains `pending`.
    */
   resyncSeq: number;
+  /**
+   * Custom guide open in the guide pane (`/review/:id/guide/:guideId`),
+   * null on the main guide. Set from the route; decides which suggested
+   * comments show (`useVisibleAnnotations`).
+   */
+  activeGuideId: string | null;
+  setActiveGuide: (guideId: string | null) => void;
   setSnapshot: (snapshot: ReviewSnapshot) => void;
   setConnected: (connected: boolean) => void;
   applyEvent: (event: ReviewEvent) => void;
@@ -285,6 +294,8 @@ export const useReview = create<ReviewState>()((set, get) => ({
   pending: [],
   streams: {},
   resyncSeq: 0,
+  activeGuideId: null,
+  setActiveGuide: (guideId) => set((s) => (s.activeGuideId === guideId ? s : { activeGuideId: guideId })),
   setSnapshot: (snapshot) =>
     set((s) => {
       // A stale fetch must never clobber newer WS state. Equal revs are
@@ -481,5 +492,26 @@ export const useReview = create<ReviewState>()((set, get) => ({
       delete next[annotationId];
       return { streams: next };
     }),
-  clear: () => set({ snapshot: null, inflight: {}, pending: [], streams: {}, resyncSeq: 0 }),
+  clear: () => set({ snapshot: null, inflight: {}, pending: [], streams: {}, resyncSeq: 0, activeGuideId: null }),
 }));
+
+/**
+ * Annotations shown in the current view: a custom guide's suggested
+ * comments stay inside that guide until marked for the PR
+ * (`annotationVisibleIn`). Returns the input list itself when nothing is
+ * left out, so callers memoising on it keep their identity.
+ */
+export function visibleAnnotations(annotations: Annotation[], activeGuideId: string | null): Annotation[] {
+  if (!annotations.some((a) => !annotationVisibleIn(a, activeGuideId))) return annotations;
+  return annotations.filter((a) => annotationVisibleIn(a, activeGuideId));
+}
+
+/** `snapshot.annotations` filtered by `visibleAnnotations` for the open guide. */
+export function useVisibleAnnotations(): Annotation[] | undefined {
+  const annotations = useReview((s) => s.snapshot?.annotations);
+  const activeGuideId = useReview((s) => s.activeGuideId);
+  return useMemo(
+    () => (annotations ? visibleAnnotations(annotations, activeGuideId) : undefined),
+    [annotations, activeGuideId],
+  );
+}
